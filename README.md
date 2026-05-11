@@ -1,134 +1,160 @@
 # data-engineering
 
-**Project: Real Data Engineering Pipeline**
+**Project: Crypto Market Data Engineering Pipeline**
 
 ---
 
 **Goal**
 
-Build a production-grade ELT pipeline that ingests raw public data, transforms it using dbt, orchestrates it with Airflow, stores it in a cloud warehouse, and surfaces it in a simple dashboard. The finished product should be something you can walk an interviewer through end-to-end and explain every architectural decision.
+Build a production-grade ELT pipeline that ingests crypto market and on-chain data at minute granularity, transforms it into a point-in-time-correct feature mart using dbt, orchestrates it with Airflow, and surfaces a downstream ML demo (volatility nowcasting or regime classification) plus a Streamlit dashboard. The finished product should be something you can walk an interviewer through end-to-end and explain every architectural decision.
+
+**The framing rule.** This is not a Bitcoin price-prediction project. It is a *data platform* project that happens to use crypto data: a point-in-time-correct feature store, incremental loads, a tested transformation layer, and a backtesting harness. The model at the end is a small demonstration that the platform works — not the point. Read this paragraph again every time you are tempted to over-invest in the model.
 
 ---
 
 **The Stack**
 
-- **Ingestion:** Python scripts pulling from a public API or CSV source
-- **Orchestration:** Apache Airflow (scheduling, DAG management, dependency handling)
-- **Warehouse:** Snowflake (free trial, 30 days) or BigQuery (free tier, generous limits)
-- **Transformation:** dbt Core (free, open source) — this is the centerpiece
-- **Storage layer:** AWS S3 or Google Cloud Storage as a staging area before warehouse load
-- **Visualization:** Streamlit or a simple Metabase/Looker Studio dashboard on top of the warehouse
-- **Infrastructure:** Docker for running Airflow locally, GitHub Actions for CI running dbt tests on every push
-- **Version control:** Git throughout, everything public on GitHub
+- **Ingestion:** Python scripts pulling from Coinbase Exchange (price) and Etherscan / mempool.space (on-chain), watermark-driven incremental loads
+- **Orchestration:** Apache Airflow — two DAGs (15-minute price ingest, hourly feature refresh)
+- **Warehouse:** Snowflake (free trial, 30 days) or BigQuery (free tier)
+- **Transformation:** dbt Core — **incremental models are mandatory** at minute granularity; this is the centerpiece
+- **Storage layer:** AWS S3 or Google Cloud Storage as a raw landing zone (Parquet, partitioned by date)
+- **ML demo:** lightgbm or sklearn for volatility nowcasting or regime classification, with walk-forward backtest
+- **Visualization:** Streamlit dashboard for features + backtested predictions + PnL with realistic costs
+- **Infrastructure:** Docker for Airflow (Astronomer Astro CLI), GitHub Actions for CI running dbt tests on every push
+- **Version control:** Git throughout, public on GitHub
 
 ---
 
 **The Dataset**
 
-Pick one that is real, messy, and large enough to be interesting. Three good options:
+Two assets, two-to-three data sources, one year of history.
 
-**Option A — NYC Taxi Trips** (recommended)
-- Source: NYC TLC public dataset, available via API or direct CSV download
-- Why: Well-known, large (millions of rows), has time-series structure, joins across multiple tables (trips, zones, weather), and interviewers recognize it as a legitimate data engineering dataset
-- Interesting questions to answer: average trip duration by borough and hour, revenue trends by month, surge patterns, tip percentage by payment type
+**Assets:** BTC-USD and ETH-USD. Two pairs is plenty — adding more is volume, not depth.
 
-**Option B — GitHub Archive**
-- Source: GH Archive (gharchive.org), public BigQuery dataset or downloadable JSON
-- Why: Event-driven data, complex schema, interesting for ML downstream, signals technical curiosity
-- Interesting questions: most active repos by language over time, PR merge time trends, contributor growth patterns
+**Granularity:** 1-minute OHLCV bars. ~525k rows per pair per year. Two pairs ≈ 1M rows of price data, plus on-chain.
 
-**Option C — NOAA Weather + Energy Data**
-- Source: NOAA Climate Data Online API + EIA (US Energy Information Administration) API
-- Why: Time-series heavy, directly relevant to the SB Energy and SES Open Orbits roles you applied to, shows domain awareness
-- Interesting questions: temperature-driven energy demand forecasting, regional consumption patterns
+**Sources (all free):**
 
-**Recommendation: Option A.** It is the most universally recognized data engineering learning dataset and the easiest to explain to any interviewer regardless of their background.
+| Layer | Source | What you get | Cadence |
+|---|---|---|---|
+| Price | Coinbase Exchange API (or Binance public) | OHLCV 1-min bars | Real-time |
+| On-chain (BTC) | mempool.space API | Mempool size, avg fee, tx count | ~10 min blocks |
+| On-chain (ETH) | Etherscan free API (or Alchemy free tier) | Gas prices, large transfers, active addresses | ~12 sec blocks |
+| Derivatives (optional) | Binance futures public API | Funding rates, open interest | 8-hourly |
+| Sentiment (optional) | alternative.me Fear & Greed Index | Daily 0-100 score | Daily |
+
+**Recommendation for v1: price + one on-chain source.** Two sources is enough to demonstrate multi-source time-joins; adding more is scope creep before the foundations are tested. Add the third source in v1.1 once the pipeline is green.
 
 ---
 
 **The Architecture**
 
 ```
-Raw Data Source (NYC TLC API / CSV)
+Coinbase API (price) + Etherscan API (on-chain)
         ↓
-Python Ingestion Script
+Python Ingestion (incremental, watermark-driven, rate-limit-aware)
         ↓
-AWS S3 / GCS (raw landing zone)
+S3 / GCS (raw landing — Parquet, partitioned by date)
         ↓
 Snowflake / BigQuery (raw schema — exact copy of source)
         ↓
-dbt (transformation layer)
-    ├── Staging models (clean column names, cast types, basic dedup)
-    ├── Intermediate models (joins, enrichment, business logic)
-    └── Mart models (final analytics-ready tables: trip_facts, zone_summary, daily_revenue)
+dbt (transformation layer — all marts incremental)
+    ├── Staging models       — type-cast, dedupe on (asset_id, event_at)
+    ├── Intermediate models  — compute features per source
+    └── Mart models:
+            ├── fct_minute_bars        — OHLCV fact table
+            ├── fct_features_pit       — point-in-time feature store (CROWN JEWEL)
+            ├── fct_model_predictions  — model output written back
+            └── dim_assets             — asset dimension
         ↓
-Airflow DAG (orchestrates ingestion → load → dbt run → dbt test)
+Airflow DAGs:
+    ├── crypto_price_ingest      — every 15 min, incremental load
+    └── crypto_features_refresh  — hourly: dbt run → dbt test → model inference
         ↓
-Streamlit / Looker Studio Dashboard
+Streamlit Dashboard (features + backtested predictions + PnL with realistic costs)
 ```
 
 ---
 
 **dbt — The Centerpiece**
 
-This is what interviewers will actually ask about. dbt is not just SQL — it is a disciplined way of thinking about data transformation. You need to understand and be able to explain:
+This is what interviewers will actually ask about. At minute granularity, dbt stops being "SQL with templates" and starts being a serious data modeling tool.
 
-**Model layers (this is the key concept):**
-- `staging/` — one model per source table, light cleaning only, no business logic. Example: `stg_taxi_trips.sql` casts pickup_datetime to timestamp, renames vendorid to vendor_id, filters out null trip distances
-- `intermediate/` — joins and enrichment that are reused across marts. Example: `int_trips_with_zones.sql` joins trips to the zone lookup table
-- `marts/` — final business-facing tables. Example: `fct_trips.sql` is your fact table, `dim_zones.sql` is your dimension table
+**Model layers:**
+- `staging/` — one model per source table, light cleaning only. Example: `stg_coinbase_ohlcv.sql` type-casts timestamps, dedupes on `(asset_id, event_at)`, drops bars with null close.
+- `intermediate/` — feature computation per source. Example: `int_price_features.sql` computes 5/15/60-minute returns, rolling realized volatility, RSI, Bollinger band positions.
+- `marts/` — final business-facing tables. Example: `fct_features_pit.sql` joins price + on-chain features at minute granularity with point-in-time correctness.
+
+**Incremental models are mandatory.** Full refreshes on millions of rows are wasteful and slow. Use `materialized='incremental'` with `unique_key=['asset_id', 'event_at']` and an `is_incremental()` filter that processes only new bars since the last run. Backfills remain deterministic via `dbt run --full-refresh`.
+
+**Point-in-time correctness — the crown jewel.** `fct_features_pit` must guarantee that the row at timestamp T contains only information knowable at T. No look-ahead. No peeking. This is the single biggest concept that separates ML-ready feature engineering from "I shuffled my time series and got 95% accuracy."
 
 **Tests:**
-- Write schema tests for every model: `not_null`, `unique`, `accepted_values`, `relationships`
-- Write at least one custom singular test (e.g., assert that no trip duration is negative)
-- Run `dbt test` in your GitHub Actions CI so tests fail loudly
+- Schema tests for every model: `not_null`, `unique`, `accepted_values`, `relationships`
+- **A custom singular test that proves point-in-time correctness:** pick a row at time T, recompute its features using only `event_at <= T`, assert they match. *This one test, mentioned in your README, is worth more than any model accuracy number.*
+- Additional singular tests: no negative volumes, high ≥ low, no future timestamps
+- `dbt test` runs in GitHub Actions on every push
 
 **Documentation:**
-- Write `description:` fields for every model and every column in your `schema.yml` files
-- Run `dbt docs generate` and `dbt docs serve` — take a screenshot for your README
-- This is what "documented, maintainable pipelines" looks like in practice
+- `description:` fields for every model and every column in `schema.yml`
+- Run `dbt docs generate` and `dbt docs serve` — screenshot for the README
+- Embed the dbt-docs DAG screenshot in the README
 
-**A sample dbt model to write:**
+**A sample incremental staging model:**
 ```sql
--- models/staging/stg_taxi_trips.sql
+-- models/staging/stg_coinbase_ohlcv.sql
+{{ config(
+    materialized='incremental',
+    unique_key=['asset_id', 'event_at']
+) }}
+
 with source as (
-    select * from {{ source('raw', 'taxi_trips') }}
+    select * from {{ source('raw', 'coinbase_ohlcv') }}
+    {% if is_incremental() %}
+      where event_at > (select coalesce(max(event_at), '2000-01-01') from {{ this }})
+    {% endif %}
 ),
-renamed as (
+cleaned as (
     select
-        vendorid as vendor_id,
-        tpep_pickup_datetime::timestamp as pickup_at,
-        tpep_dropoff_datetime::timestamp as dropoff_at,
-        passenger_count,
-        trip_distance,
-        pulocationid as pickup_location_id,
-        dolocationid as dropoff_location_id,
-        fare_amount,
-        tip_amount,
-        total_amount,
-        payment_type
+        product_id                  as asset_id,
+        time::timestamp             as event_at,
+        open::numeric(18,8)         as open_price,
+        high::numeric(18,8)         as high_price,
+        low::numeric(18,8)          as low_price,
+        close::numeric(18,8)        as close_price,
+        volume::numeric(28,8)       as volume
     from source
-    where trip_distance > 0
-      and fare_amount > 0
-      and pickup_at < dropoff_at
+    where close is not null
+      and volume >= 0
+      and high >= low
 )
-select * from renamed
+select * from cleaned
 ```
 
 ---
 
 **Airflow — The Orchestration Layer**
 
-Run Airflow locally with Docker using the official Astronomer Astro CLI (free, easiest setup) or the official `docker-compose.yaml` from the Airflow docs.
+Run Airflow locally with Docker (Astronomer Astro CLI or the official `docker-compose.yaml`).
 
-Your DAG should have these tasks in order:
-1. `ingest_raw_data` — Python operator that pulls data from source and uploads to S3/GCS
-2. `load_to_warehouse` — uses Snowflake's COPY INTO or BigQuery's load job to move raw data from S3 into the raw schema
-3. `dbt_run` — BashOperator running `dbt run --select staging+ ` (run staging first, then downstream)
-4. `dbt_test` — BashOperator running `dbt test`
-5. `notify_on_failure` — email or Slack alert if any task fails
+**Two DAGs, not one.** Crypto data moves faster than the daily-batch pattern assumes, so split ingestion from transformation:
 
-Set the DAG to run daily on a schedule. Even if you are not running it in production, the schedule being set correctly signals you understand orchestration as a production concept.
+**DAG 1: `crypto_price_ingest`** — runs every 15 minutes
+1. `fetch_new_bars` — Python operator pulling new bars from Coinbase since last watermark
+2. `upload_to_s3` — write Parquet to `s3://.../raw/coinbase/dt=YYYY-MM-DD/`
+3. `copy_into_warehouse` — Snowflake `COPY INTO` or BigQuery load job
+4. `update_watermark` — record the latest ingested timestamp
+
+**DAG 2: `crypto_features_refresh`** — runs hourly
+1. `dbt_run_staging` — `dbt run --select staging`
+2. `dbt_run_intermediate` — `dbt run --select intermediate`
+3. `dbt_run_marts` — `dbt run --select marts`
+4. `dbt_test` — `dbt test`; **failure halts downstream tasks**
+5. `run_inference` — load `fct_features_pit`, run model, write predictions to `fct_model_predictions`
+6. `notify_on_failure` — Slack/email alert
+
+The `dbt_test >> run_inference` dependency is the single most important Airflow design decision in this project: it gates model inference on data quality. Bad data never reaches the model.
 
 **A sample DAG skeleton:**
 ```python
@@ -136,7 +162,7 @@ from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from datetime import datetime, timedelta
-from ingestion.extract import ingest_taxi_data
+from ingestion.coinbase import fetch_new_bars
 
 default_args = {
     'owner': 'derek',
@@ -146,35 +172,25 @@ default_args = {
 }
 
 with DAG(
-    dag_id='taxi_pipeline',
+    dag_id='crypto_price_ingest',
     default_args=default_args,
-    schedule_interval='@daily',
-    start_date=datetime(2024, 1, 1),
+    schedule_interval='*/15 * * * *',
+    start_date=datetime(2026, 1, 1),
     catchup=False,
-    tags=['taxi', 'production'],
+    tags=['crypto', 'ingest'],
 ) as dag:
 
-    ingest = PythonOperator(
-        task_id='ingest_raw_data',
-        python_callable=ingest_taxi_data,
+    fetch = PythonOperator(
+        task_id='fetch_new_bars',
+        python_callable=fetch_new_bars,
     )
 
-    load = BashOperator(
-        task_id='load_to_warehouse',
+    copy_in = BashOperator(
+        task_id='copy_into_warehouse',
         bash_command='python scripts/load_to_snowflake.py',
     )
 
-    dbt_run = BashOperator(
-        task_id='dbt_run',
-        bash_command='cd /dbt && dbt run --profiles-dir .',
-    )
-
-    dbt_test = BashOperator(
-        task_id='dbt_test',
-        bash_command='cd /dbt && dbt test --profiles-dir .',
-    )
-
-    ingest >> load >> dbt_run >> dbt_test
+    fetch >> copy_in
 ```
 
 ---
@@ -182,57 +198,67 @@ with DAG(
 **Getting Started — Step By Step**
 
 **Week 1: Infrastructure and raw ingestion**
-1. Set up a free Snowflake trial account or GCP project with BigQuery
-2. Install Astronomer Astro CLI, initialize an Airflow project (`astro dev init`)
-3. Write the Python ingestion script — download 3 months of NYC taxi data, upload to S3 or GCS
-4. Write the warehouse load script — use Snowflake's Python connector or BigQuery's Python client to COPY the data in
-5. Confirm raw data is in your warehouse and queryable
+1. Set up a free Snowflake trial or GCP project with BigQuery
+2. Install Astro CLI, `astro dev init`
+3. Write the Coinbase ingestion script — pull 2 months of BTC-USD and ETH-USD 1-min bars, upload Parquet to S3/GCS
+4. Write the warehouse `COPY INTO` script
+5. **Implement incremental loads with a watermark** — the second run must only load new bars
+6. Confirm raw data is queryable and the incremental contract holds
 
-**Week 2: dbt transformation layer**
-1. Install dbt Core with the Snowflake or BigQuery adapter (`pip install dbt-snowflake` or `pip install dbt-bigquery`)
-2. Initialize a dbt project (`dbt init`)
-3. Write staging models for trips and zones
-4. Write intermediate join model
-5. Write at least two mart models (fct_trips, dim_zones)
-6. Write schema tests for every model
-7. Run `dbt docs generate` and take the screenshot
+**Week 2: dbt transformation layer (the heart of the project)**
+1. `pip install dbt-snowflake` or `dbt-bigquery`, then `dbt init`
+2. Write `stg_coinbase_ohlcv.sql` as an incremental model
+3. Write `int_price_features.sql` (returns, rolling realized volatility, RSI)
+4. Add the on-chain source — write `stg_etherscan_gas.sql` and `int_onchain_features.sql`
+5. Write `fct_features_pit.sql` — the point-in-time feature mart
+6. **Write the PIT-correctness singular test** (non-negotiable; this is the project's signature)
+7. Add schema tests for every model
+8. `dbt docs generate` — screenshot for the README
 
-**Week 3: Orchestration, CI, and polish**
-1. Wire the Airflow DAG to run ingestion → load → dbt run → dbt test in sequence
-2. Set up GitHub Actions to run `dbt test` on every push (use dbt's official GitHub Action)
-3. Write a strong README with architecture diagram, setup instructions, and a section explaining your design decisions
-4. Build a simple Streamlit dashboard querying your mart tables directly via the Snowflake connector
-5. Record a 2-minute Loom walkthrough of the pipeline end-to-end — link it in the README
+**Week 3: Orchestration, ML demo, CI, polish**
+1. Wire the two Airflow DAGs
+2. Train a simple model (lightgbm) on `fct_features_pit`. Target options:
+   - **Realized volatility nowcast** (recommended — models genuinely work)
+   - **Regime classification** (high-vol vs low-vol)
+   - Directional prediction — only if reported honestly with walk-forward results and transaction costs
+3. Walk-forward validation only — no shuffled splits, no data leakage
+4. Write predictions back to `fct_model_predictions` from an Airflow task
+5. Set up GitHub Actions to run `dbt test` on every push (use dbt's official action)
+6. Build a Streamlit dashboard: features over time, predictions, backtest PnL with 5bps transaction costs
+7. Write the README sections explaining architecture and *why* PIT correctness matters
+8. Record a 2-minute Loom walkthrough; link in README
 
 ---
 
 **What To Say In An Interview**
 
-The questions you will get and what you should be able to answer:
-
 *"Walk me through your dbt project structure."*
-Explain staging → intermediate → marts, why you separate concerns, what goes in each layer.
+Staging → intermediate → marts. Staging dedupes and type-casts per source table. Intermediate computes features per source. Marts are business-facing; `fct_features_pit` joins price + on-chain features at minute granularity with point-in-time correctness.
 
-*"Why did you choose Snowflake over Redshift?"*
-Free trial, column-oriented storage well-suited for analytical queries, easy Python connector, separation of compute and storage.
+*"What does 'point-in-time correct' actually mean?"*
+The feature row at timestamp T uses only data with `event_at <= T`. No look-ahead. I have a custom dbt singular test that proves it by recomputing a sample row from raw data and asserting equality. Without this guarantee, a time-series ML model trained on the features is lying to itself.
 
-*"How do you handle schema changes in the source data?"*
-dbt's `source freshness` checks, contract tests in dbt 1.5+, version control on your schema.yml.
+*"Why incremental models?"*
+At minute granularity, a year of two assets is ~1M rows of price data alone, growing daily. Full refreshes are wasteful and slow. Incremental models with `unique_key=(asset_id, event_at)` and an `is_incremental()` watermark process only new bars each run. Backfills are still deterministic via `--full-refresh`.
 
 *"What happens if a dbt test fails?"*
-The Airflow DAG stops at the dbt_test task, sends an alert, and the mart tables are not updated until the issue is resolved. You do not serve bad data downstream.
+The features_refresh DAG halts at `dbt_test` and never reaches `run_inference`. The mart is not updated and the model is not run on bad data. Quality gating downstream of tests is the whole point of the orchestration design.
 
-*"What would you do differently if this were true production?"*
-Add incremental models instead of full refreshes, implement proper secrets management (not hardcoded credentials), add row count anomaly detection, add a data catalog.
+*"How does the model perform?"*
+[Honest answer.] For directional prediction, ~52% accuracy out-of-sample, not profitable after 5bps transaction costs. The volatility nowcasting model performs meaningfully better — but the point of this project is the platform, not the alpha. Production ML is mostly about the pipeline feeding the model.
+
+*"Why Snowflake over Redshift?"*
+Free trial, column-oriented storage well-suited to analytical queries on time-series data, clean separation of compute and storage, easy Python connector, no cluster management.
+
+*"What would you do differently in true production?"*
+Secrets via Vault, not env files. Feature store (Feast) instead of a dbt mart for low-latency serving. Row-count anomaly detection on each load. Schema contracts via dbt 1.5+. Model monitoring for feature drift. Separate dev/staging/prod warehouses.
 
 ---
 
 **How To Frame It On Your Resume**
 
-Once built, the bullet points should read:
+- Built an incremental ELT pipeline ingesting minute-granularity OHLCV (Coinbase) and on-chain (Etherscan) data into Snowflake via S3 Parquet staging; orchestrated with two Airflow DAGs (15-minute ingest, hourly feature refresh) and watermark-driven loads
+- Designed a dbt transformation layer producing a point-in-time-correct feature mart; wrote 40+ schema tests plus a custom singular test enforcing PIT correctness, all gated in GitHub Actions CI on every commit
+- Delivered a Streamlit analytics dashboard surfacing features, model predictions, and walk-forward backtest results with realistic transaction costs; honest reporting on out-of-sample model performance
 
-- Built an end-to-end ELT pipeline ingesting 3M+ NYC taxi records from the TLC API into Snowflake via AWS S3; orchestrated daily runs using Airflow with automated retry and failure alerting
-- Designed a dbt transformation layer with staging, intermediate, and mart models; wrote 40+ schema and custom tests enforced via GitHub Actions CI on every commit
-- Deployed a Streamlit analytics dashboard querying mart tables directly, surfacing trip revenue trends, borough-level demand patterns, and payment behavior insights
-
-Those three bullets answer every "dbt, Airflow, Snowflake" gap you had this entire session.
+Those three bullets demonstrate: incremental dbt, point-in-time correctness, Airflow with quality gating, CI for data, multi-source API ingestion. That is the exact skill stack DE postings ask for.
