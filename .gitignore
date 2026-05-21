@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Environment variables and secrets — NEVER commit real credentials
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+service-account*.json
+
+# Data files (don't commit raw or processed data)
+data/
+*.parquet
+*.csv.gz
+*.json.gz
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+dbt/.user.yml
+profiles.yml
+
+# Airflow
+airflow/logs/
+airflow/airflow.db
+airflow/airflow-webserver.pid
+airflow/.astro/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
