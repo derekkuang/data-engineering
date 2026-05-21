@@ -16,9 +16,9 @@ Build a production-grade ELT pipeline that ingests crypto market and on-chain da
 
 - **Ingestion:** Python scripts pulling from Coinbase Exchange (price) and Etherscan / mempool.space (on-chain), watermark-driven incremental loads
 - **Orchestration:** Apache Airflow — two DAGs (15-minute price ingest, hourly feature refresh)
-- **Warehouse:** Snowflake (free trial, 30 days) or BigQuery (free tier)
-- **Transformation:** dbt Core — **incremental models are mandatory** at minute granularity; this is the centerpiece
-- **Storage layer:** AWS S3 or Google Cloud Storage as a raw landing zone (Parquet, partitioned by date)
+- **Warehouse:** Snowflake on AWS (free trial), reading S3 via a storage integration + external stage
+- **Transformation:** dbt Core (`dbt-snowflake`) — **incremental models are mandatory** at minute granularity; this is the centerpiece
+- **Storage layer:** AWS S3 as a raw landing zone (Parquet, partitioned by date)
 - **ML demo:** lightgbm or sklearn for volatility nowcasting or regime classification, with walk-forward backtest
 - **Visualization:** Streamlit dashboard for features + backtested predictions + PnL with realistic costs
 - **Infrastructure:** Docker for Airflow (Astronomer Astro CLI), GitHub Actions for CI running dbt tests on every push
@@ -55,9 +55,9 @@ Coinbase API (price) + Etherscan API (on-chain)
         ↓
 Python Ingestion (incremental, watermark-driven, rate-limit-aware)
         ↓
-S3 / GCS (raw landing — Parquet, partitioned by date)
+AWS S3 (raw landing — Parquet, partitioned by date) — single source of truth
         ↓
-Snowflake / BigQuery (raw schema — exact copy of source)
+Snowflake (external stage over S3 via storage integration)
         ↓
 dbt (transformation layer — all marts incremental)
     ├── Staging models       — type-cast, dedupe on (asset_id, event_at)
@@ -198,7 +198,7 @@ with DAG(
 **Getting Started — Step By Step**
 
 **Week 1: Infrastructure and raw ingestion**
-1. Set up a free Snowflake trial or GCP project with BigQuery
+1. Set up a free Snowflake trial (AWS, `us-east-1`) and an S3 storage integration — see `docs/setup/02-snowflake-s3.md`
 2. Install Astro CLI, `astro dev init`
 3. Write the Coinbase ingestion script — pull 2 months of BTC-USD and ETH-USD 1-min bars, upload Parquet to S3/GCS
 4. Write the warehouse `COPY INTO` script
@@ -206,7 +206,7 @@ with DAG(
 6. Confirm raw data is queryable and the incremental contract holds
 
 **Week 2: dbt transformation layer (the heart of the project)**
-1. `pip install dbt-snowflake` or `dbt-bigquery`, then `dbt init`
+1. `uv add dbt-snowflake`, then `dbt init` (profile points at `crypto_wh` / `crypto_db`)
 2. Write `stg_coinbase_ohlcv.sql` as an incremental model
 3. Write `int_price_features.sql` (returns, rolling realized volatility, RSI)
 4. Add the on-chain source — write `stg_etherscan_gas.sql` and `int_onchain_features.sql`

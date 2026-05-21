@@ -1,6 +1,8 @@
-# GCP / BigQuery Setup Spec
+# GCP / BigQuery Setup Spec — ⚠️ SUPERSEDED
 
-**Status:** in progress — Phase 1, Week 1 infrastructure.
+> **SUPERSEDED 2026-05-20.** The project switched its warehouse to **Snowflake on AWS** (strongest resume keyword; reuses the existing S3 landing zone). See [`02-snowflake-s3.md`](02-snowflake-s3.md) for the active setup. This file is kept for reference and as the record of the GCP IAM/least-privilege work (which transfers conceptually). The GCP resources below should be **torn down** — see the teardown section at the bottom.
+
+**Status:** ✅ was completed end-to-end (SA, roles, key, healthcheck all verified) — now retired. Project ID: `crypto-de-portfolio`.
 **Decision (2026-05-20):** Full GCP project with **billing enabled** (not sandbox). We rely on BigQuery's permanent free tier (10 GB storage, 1 TB queries/month) so real cost stays ~$0, while keeping no table-expiry and the ability to leave the project live as a portfolio demo.
 
 This mirrors the discipline already used on the AWS side: a least-privilege service account, long-lived credentials kept out of the repo, and an end-to-end healthcheck before we trust it.
@@ -100,7 +102,16 @@ uv add google-cloud-bigquery
 | Auth | Service account key JSON, gitignored, `~/.config/gcp/` | Least privilege; mirrors AWS discipline |
 | IAM scope | `jobUser` + `dataEditor` at project level | Simple start; per-dataset tightening is a follow-up |
 
-## Follow-ups (not blocking)
+## Teardown (do once Snowflake is verified)
 
-- Tighten IAM from project-level to per-dataset grants.
-- Decide raw-load path: external table over GCS Parquet (per architecture rule #1) vs native load — affects whether we also create a GCS bucket alongside the existing S3 one.
+This project is retired. Tear it down to avoid an orphaned credential and any billing exposure:
+
+```bash
+# 1) Delete the local service-account key (unused credential = liability)
+rm -f ~/.config/gcp/crypto-de-sa.json
+
+# 2) Delete the GCP project entirely (removes datasets, SA, and stops billing)
+gcloud projects delete crypto-de-portfolio
+```
+
+Then revert the `GCP_*` / `GOOGLE_APPLICATION_CREDENTIALS` lines in `.env` (Snowflake config replaces them), and optionally `uv remove google-cloud-bigquery`.
