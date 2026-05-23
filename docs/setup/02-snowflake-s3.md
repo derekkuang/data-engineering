@@ -1,6 +1,8 @@
 # Snowflake + S3 Setup Spec
 
-**Status:** not started (2026-05-20). This is the **active** warehouse setup; it supersedes [`01-gcp-bigquery.md`](01-gcp-bigquery.md).
+> **⚠️ SUPERSEDED (2026-05-22) — never executed.** Snowflake's only remaining trial is now the card-required **Cortex Code CLI** signup that auto-converts to **$20/month**; the card-free 30-day trial this spec assumed is gone. Pivoted to **S3 + Athena (all-AWS)** — see [`03-athena-s3.md`](03-athena-s3.md). Kept for the decision trail. No Snowflake objects or AWS roles were ever created, so there is nothing to tear down.
+
+**Status:** ~~not started (2026-05-20). Active warehouse setup; supersedes [`01-gcp-bigquery.md`](01-gcp-bigquery.md).~~ Superseded 2026-05-22 (see banner).
 
 **Decision:** warehouse = **Snowflake on AWS**, reading raw Parquet from the existing S3 landing zone. Chosen for resume-keyword strength (Snowflake is the most-requested warehouse in DE postings; "Snowflake + dbt + Airflow + S3" is the canonical modern data stack) and because it reuses the S3 + IAM work already done. Trade-off accepted: 30-day / ~$400-credit trial, not perma-free — fine because the portfolio lives in GitHub + README + a Loom walkthrough, not a perpetually-live warehouse.
 

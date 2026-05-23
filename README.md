@@ -16,8 +16,8 @@ Build a production-grade ELT pipeline that ingests crypto market and on-chain da
 
 - **Ingestion:** Python scripts pulling from Coinbase Exchange (price) and Etherscan / mempool.space (on-chain), watermark-driven incremental loads
 - **Orchestration:** Apache Airflow — two DAGs (15-minute price ingest, hourly feature refresh)
-- **Warehouse:** Snowflake on AWS (free trial), reading S3 via a storage integration + external stage
-- **Transformation:** dbt Core (`dbt-snowflake`) — **incremental models are mandatory** at minute granularity; this is the centerpiece
+- **Warehouse:** Amazon Athena (serverless, pay-per-scan), querying S3 Parquet in place via the Glue Data Catalog — a lakehouse, not a load-and-store warehouse
+- **Transformation:** dbt Core (`dbt-athena`) — **incremental models are mandatory** at minute granularity; marts materialize as Iceberg tables for clean incremental `MERGE`. This is the centerpiece
 - **Storage layer:** AWS S3 as a raw landing zone (Parquet, partitioned by date)
 - **ML demo:** lightgbm or sklearn for volatility nowcasting or regime classification, with walk-forward backtest
 - **Visualization:** Streamlit dashboard for features + backtested predictions + PnL with realistic costs
@@ -57,9 +57,9 @@ Python Ingestion (incremental, watermark-driven, rate-limit-aware)
         ↓
 AWS S3 (raw landing — Parquet, partitioned by date) — single source of truth
         ↓
-Snowflake (external stage over S3 via storage integration)
+Athena + Glue Data Catalog (external table over S3 — queried in place, no load step)
         ↓
-dbt (transformation layer — all marts incremental)
+dbt (transformation layer — all marts incremental, materialized as Iceberg)
     ├── Staging models       — type-cast, dedupe on (asset_id, event_at)
     ├── Intermediate models  — compute features per source
     └── Mart models:
@@ -142,9 +142,10 @@ Run Airflow locally with Docker (Astronomer Astro CLI or the official `docker-co
 
 **DAG 1: `crypto_price_ingest`** — runs every 15 minutes
 1. `fetch_new_bars` — Python operator pulling new bars from Coinbase since last watermark
-2. `upload_to_s3` — write Parquet to `s3://.../raw/coinbase/dt=YYYY-MM-DD/`
-3. `copy_into_warehouse` — Snowflake `COPY INTO` or BigQuery load job
-4. `update_watermark` — record the latest ingested timestamp
+2. `upload_to_s3` — write Parquet to `s3://.../raw/coinbase_ohlcv/dt=YYYY-MM-DD/`
+3. `update_watermark` — record the latest ingested timestamp
+
+   (No load step — Athena queries the new Parquet in place via partition projection. The lakehouse pays off here: landing the file *is* loading it.)
 
 **DAG 2: `crypto_features_refresh`** — runs hourly
 1. `dbt_run_staging` — `dbt run --select staging`
@@ -185,12 +186,12 @@ with DAG(
         python_callable=fetch_new_bars,
     )
 
-    copy_in = BashOperator(
-        task_id='copy_into_warehouse',
-        bash_command='python scripts/load_to_snowflake.py',
+    upload = PythonOperator(
+        task_id='upload_to_s3',
+        python_callable=upload_parquet_to_s3,
     )
 
-    fetch >> copy_in
+    fetch >> upload  # no warehouse-load task — Athena reads the S3 Parquet directly
 ```
 
 ---
@@ -198,15 +199,14 @@ with DAG(
 **Getting Started — Step By Step**
 
 **Week 1: Infrastructure and raw ingestion**
-1. Set up a free Snowflake trial (AWS, `us-east-1`) and an S3 storage integration — see `docs/setup/02-snowflake-s3.md`
-2. Install Astro CLI, `astro dev init`
-3. Write the Coinbase ingestion script — pull 2 months of BTC-USD and ETH-USD 1-min bars, upload Parquet to S3/GCS
-4. Write the warehouse `COPY INTO` script
-5. **Implement incremental loads with a watermark** — the second run must only load new bars
-6. Confirm raw data is queryable and the incremental contract holds
+1. Write the Coinbase ingestion script — pull 2 months of BTC-USD and ETH-USD 1-min bars, upload Parquet to `s3://.../raw/coinbase_ohlcv/dt=YYYY-MM-DD/`
+2. **Implement incremental loads with a watermark** — the second run must only fetch new bars
+3. Set up Athena over the S3 raw zone (Glue external table + partition projection, workgroup, healthcheck) — see `docs/setup/03-athena-s3.md`
+4. Confirm raw data is queryable in Athena and the incremental contract holds
+5. Install Astro CLI, `astro dev init`
 
 **Week 2: dbt transformation layer (the heart of the project)**
-1. `uv add dbt-snowflake`, then `dbt init` (profile points at `crypto_wh` / `crypto_db`)
+1. `uv add dbt-athena-community`, then `dbt init` (profile: `type: athena`, workgroup `crypto_wg`, region `us-east-1`)
 2. Write `stg_coinbase_ohlcv.sql` as an incremental model
 3. Write `int_price_features.sql` (returns, rolling realized volatility, RSI)
 4. Add the on-chain source — write `stg_etherscan_gas.sql` and `int_onchain_features.sql`
@@ -247,8 +247,8 @@ The features_refresh DAG halts at `dbt_test` and never reaches `run_inference`. 
 *"How does the model perform?"*
 [Honest answer.] For directional prediction, ~52% accuracy out-of-sample, not profitable after 5bps transaction costs. The volatility nowcasting model performs meaningfully better — but the point of this project is the platform, not the alpha. Production ML is mostly about the pipeline feeding the model.
 
-*"Why Snowflake over Redshift?"*
-Free trial, column-oriented storage well-suited to analytical queries on time-series data, clean separation of compute and storage, easy Python connector, no cluster management.
+*"Why Athena over Snowflake/Redshift?"*
+It's a lakehouse, not a warehouse: the Parquet in S3 is the single source of truth and Athena queries it in place — no load step, no cluster to manage, no compute running when idle. Pay-per-scan is near-zero at this data volume, and partition projection prunes scans to the `dt` partitions a query needs. It also keeps the stack single-cloud (no cross-cloud egress) and Phase-3-ready: the same S3 Parquet is readable by Spark (Glue/EMR) for tick-data aggregation. Trade-off I made consciously: dbt incremental models need Iceberg table format on Athena to get clean `MERGE` semantics — slightly more setup than Snowflake, which I document.
 
 *"What would you do differently in true production?"*
 Secrets via Vault, not env files. Feature store (Feast) instead of a dbt mart for low-latency serving. Row-count anomaly detection on each load. Schema contracts via dbt 1.5+. Model monitoring for feature drift. Separate dev/staging/prod warehouses.
@@ -257,7 +257,7 @@ Secrets via Vault, not env files. Feature store (Feast) instead of a dbt mart fo
 
 **How To Frame It On Your Resume**
 
-- Built an incremental ELT pipeline ingesting minute-granularity OHLCV (Coinbase) and on-chain (Etherscan) data into Snowflake via S3 Parquet staging; orchestrated with two Airflow DAGs (15-minute ingest, hourly feature refresh) and watermark-driven loads
+- Built an incremental ELT pipeline ingesting minute-granularity OHLCV (Coinbase) and on-chain (Etherscan) data into an S3 Parquet lakehouse queried by Athena (Glue Data Catalog, partition projection, Iceberg marts); orchestrated with two Airflow DAGs (15-minute ingest, hourly feature refresh) and watermark-driven loads
 - Designed a dbt transformation layer producing a point-in-time-correct feature mart; wrote 40+ schema tests plus a custom singular test enforcing PIT correctness, all gated in GitHub Actions CI on every commit
 - Delivered a Streamlit analytics dashboard surfacing features, model predictions, and walk-forward backtest results with realistic transaction costs; honest reporting on out-of-sample model performance
 

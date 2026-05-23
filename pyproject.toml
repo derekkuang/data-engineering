@@ -5,7 +5,10 @@ description = "Production-grade ELT pipeline for crypto market data with a point
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "boto3>=1.43.14",
     "httpx>=0.27.0",
+    "pandas>=3.0.3",
+    "pyarrow>=24.0.0",
     "python-dotenv>=1.0.0",
 ]
 
@@ -26,3 +29,18 @@ select = ["E", "F", "I", "B", "UP"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
+
+# Third-party libs without bundled type stubs. boto3 famously ships no stubs
+# (the official path is the boto3-stubs package, which is heavy); pyarrow's
+# stubs are partial. Silence missing-import noise from these only.
+[[tool.mypy.overrides]]
+module = [
+    "boto3",
+    "botocore",
+    "botocore.*",
+    "pyarrow",
+    "pyarrow.*",
+    "pandas",
+    "pandas.*",
+]
+ignore_missing_imports = true
