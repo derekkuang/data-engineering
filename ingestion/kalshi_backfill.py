@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -39,24 +40,63 @@ from ingestion.kalshi_storage import write_candles_to_s3
 logger = logging.getLogger("kalshi_backfill")
 
 
+# Kalshi caps "requested candlesticks across all markets" (= n_markets × minutes
+# in the time range) at 10,000 per batch call. Keep a margin under that.
+CANDLE_BUDGET = 9000
+
+
+def _chunk_by_budget(day_markets: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Greedily group time-contiguous markets so n_markets × span_minutes stays
+    under the batch budget (markets are sorted by open_time)."""
+    chunks: list[list[dict[str, Any]]] = []
+    cur: list[dict[str, Any]] = []
+    for market in day_markets:
+        trial = cur + [market]
+        span_min = (
+            _parse_iso(trial[-1]["close_time"]) - _parse_iso(trial[0]["open_time"])
+        ).total_seconds() / 60 + 2
+        if cur and len(trial) * span_min > CANDLE_BUDGET:
+            chunks.append(cur)
+            cur = [market]
+        else:
+            cur = trial
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
 def _fetch_candles(
     client: KalshiClient, markets: list[dict[str, Any]], series: str
 ) -> list[KalshiCandle]:
-    """Fetch + normalize 1-min candlesticks for each market (skips on per-market error)."""
-    candles: list[KalshiCandle] = []
-    for i, market in enumerate(markets, start=1):
-        ticker = market["ticker"]
+    """Fetch + normalize candlesticks via the batch endpoint, grouped into
+    time-contiguous chunks that respect the per-call candlestick budget — a few
+    calls per day instead of ~96 per-market calls."""
+    by_day: dict[Any, list[dict[str, Any]]] = defaultdict(list)
+    for market in markets:
         try:
-            open_ts = int(_parse_iso(market["open_time"]).timestamp())
-            close_ts = int(_parse_iso(market["close_time"]).timestamp())
-            raw = client.get_market_candlesticks(
-                series, ticker, open_ts - 60, close_ts + 60, period_interval=1
-            )
-            candles.extend(normalize_market_candles(market, raw, series))
+            by_day[_parse_iso(market["close_time"]).date()].append(market)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("skipping %s — %r", ticker, exc)
-        if i % 25 == 0:
-            logger.info("  ...%d/%d markets, %d candles so far", i, len(markets), len(candles))
+            logger.warning("skipping market with bad close_time %r — %r", market.get("ticker"), exc)
+
+    candles: list[KalshiCandle] = []
+    for day, day_markets in sorted(by_day.items()):
+        day_markets.sort(key=lambda m: m["open_time"])
+        for chunk in _chunk_by_budget(day_markets):
+            try:
+                opens = [int(_parse_iso(m["open_time"]).timestamp()) for m in chunk]
+                closes = [int(_parse_iso(m["close_time"]).timestamp()) for m in chunk]
+                cs_by_ticker = client.get_market_candlesticks_batch(
+                    [m["ticker"] for m in chunk],
+                    min(opens) - 60,
+                    max(closes) + 60,
+                    period_interval=1,
+                )
+                for m in chunk:
+                    cs = cs_by_ticker.get(m["ticker"], [])
+                    candles.extend(normalize_market_candles(m, cs, series))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("skipping a chunk of %d markets on %s — %r", len(chunk), day, exc)
+        logger.info("  %s: %d markets, %d candles cumulative", day, len(day_markets), len(candles))
     return candles
 
 

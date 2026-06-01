@@ -16,13 +16,15 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 **Built + verified:**
 - `ingestion/kalshi.py` — public/optional-auth client (retry+backoff, 0.5s pacing for the rate limit), `list_markets` (cursor pagination), `get_market_candlesticks`, `KalshiCandle` + `normalize_market_candles`. Public healthcheck `scripts/healthcheck_kalshi.py` green.
 - `ingestion/kalshi_storage.py` — S3 Parquet writer, explicit schema = Glue DDL contract, one file per `dt` (window open date), idempotent overwrite. `ingestion/kalshi_backfill.py` — `backfill(days)` (settled history) + `ingest_current_day()` (re-fetch today, overwrite — the live contract).
-- **Backfilled 7 days** → 8 partitions, ~11k candles in `s3://.../raw/kalshi_btc_15min/dt=.../`.
+- **Backfilled the FULL available history** (`KXBTC15M` launched 2026-03-26 — probed the ceiling) → **68 daily partitions, 101,053 candles (~4.5 MiB)** in `s3://.../raw/kalshi_btc_15min/dt=.../`, in ~4 min.
 - **Live Airflow task** `ingest_kalshi_15m` added to `crypto_price_ingest` (parallel to the OHLCV mapped tasks). Added `cryptography` to `airflow/requirements.txt` + `KALSHI_API_BASE` to `airflow/.env`, rebuilt the image; **task ran green in-container**: `{'markets': 97, 'candles': 1432, 'files': 2}` written to S3.
 - Glue external table DDL written to `docs/setup/05-kalshi-ingestion.md` with partition projection.
 
 **Learned / gotchas:**
 - The **Glue table is a USER action**: the least-priv `crypto-de-pipeline` user is read-only on `crypto_raw`, so `CREATE EXTERNAL TABLE crypto_raw.kalshi_btc_15min` fails with `AccessDenied: glue:CreateTable` — must be run with owner/admin (Athena console), same as `coinbase_ohlcv`. DDL is in `docs/setup/05`.
-- Public API **rate-limits (429)** quickly → client paces 0.5s/call + exponential backoff; backfill of 7 days (~660 markets) ran clean in ~3.5 min.
+- Public API **rate-limits (429)** quickly → client paces 0.5s/call + exponential backoff.
+- **Batch candlesticks endpoint** (`GET /markets/candlesticks`, ≤100 tickers, public) cut the full 6,320-market backfill from ~1 hr to ~4 min. Gotcha: its cap is on candlesticks **requested** = `n_markets × range_minutes` (max 10,000), NOT returned — a full-day range × 96 markets = 138,240 → 400. Fix: greedy **time-contiguous chunks** keeping `n × span ≤ 9000` (`_chunk_by_budget`), ~4 calls/day.
+- Ceiling probe: `KXBTC15M` 15-min markets exist only back to **2026-03-26** (~66 days) — Kalshi history is the binding constraint on training/backtest depth, not Coinbase.
 - During setup the demo key got pasted into `KALSHI_PRIVATE_KEY_PATH` (the field wants a *file path*) and a fragment surfaced in a tool error. Since we dropped auth, `.env` was cleaned to public config — **the unused demo key can be deleted in Kalshi** for hygiene.
 
 **▶ PICK UP HERE NEXT TIME:**

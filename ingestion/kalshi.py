@@ -180,6 +180,29 @@ class KalshiClient:
         candles: list[dict[str, Any]] = resp.get("candlesticks", [])
         return candles
 
+    def get_market_candlesticks_batch(
+        self, market_tickers: list[str], start_ts: int, end_ts: int, period_interval: int = 1
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Candlesticks for many markets in ONE call (Kalshi allows up to 100 tickers
+        and 10,000 candlesticks per request), chunked at 100. Returns
+        ``{market_ticker: candlesticks}``. A whole day of 15-min markets (~96 × 16
+        bars) fits in one call — far fewer requests than per-market fetching."""
+        out: dict[str, list[dict[str, Any]]] = {}
+        for i in range(0, len(market_tickers), 100):
+            chunk = market_tickers[i : i + 100]
+            resp = self.get(
+                "/markets/candlesticks",
+                params={
+                    "market_tickers": ",".join(chunk),
+                    "start_ts": start_ts,
+                    "end_ts": end_ts,
+                    "period_interval": period_interval,
+                },
+            )
+            for entry in resp.get("markets", []):
+                out[entry["market_ticker"]] = entry.get("candlesticks", [])
+        return out
+
     def close(self) -> None:
         self._http.close()
 
