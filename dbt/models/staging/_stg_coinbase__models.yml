@@ -1,0 +1,42 @@
+version: 2
+
+models:
+  - name: stg_coinbase_ohlcv
+    description: >
+      Cleaned 1-minute Coinbase OHLCV bars: renamed/cast, impossible bars
+      dropped, deduplicated to one row per (asset_id, event_at). A view over the
+      raw external table — the entry point for the intermediate/marts layers.
+    columns:
+      - name: asset_id
+        description: "Trading pair, e.g. BTC-USD."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['BTC-USD', 'ETH-USD']
+      - name: event_at
+        description: "Bar open time, UTC, microsecond precision."
+        tests:
+          - not_null
+      - name: open_price
+        description: "Open price (USD)."
+      - name: high_price
+        description: "High price (USD)."
+      - name: low_price
+        description: "Low price (USD)."
+      - name: close_price
+        description: "Close price (USD)."
+        tests:
+          - not_null
+      - name: volume
+        description: "Base-asset volume traded during the bar."
+      - name: ingested_at
+        description: "Wall-clock UTC time the ingestion run wrote this row."
+      - name: partition_date
+        description: "Source dt partition (YYYY-MM-DD) the bar came from."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - asset_id
+              - event_at

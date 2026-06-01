@@ -4,6 +4,28 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-05-31 — dbt-athena stood up; first staging model (view) green end-to-end
+
+**Did:**
+- `uv add dbt-athena-community` (pulls dbt-core 1.11.11 + dbt-athena 1.10.1). First two `uv add` attempts no-op'd silently (flaky cache/network — "Resolved N packages", exit 0, but pyproject untouched); the third actually installed. Worth knowing: a 0 exit from `uv add` isn't proof the dep landed — verify pyproject/the venv.
+- Scaffolded the dbt project under `dbt/`: `dbt_project.yml` (staging `+materialized: view` folder default), in-repo `profiles.yml` (env-var driven, **no secrets** — Athena auth rides the AWS credential chain; `database: awsdatacatalog` = catalog, `schema: crypto_staging` = Glue db dbt writes to), `packages.yml` (dbt_utils 1.3.3).
+- **First model `stg_coinbase_ohlcv` as a VIEW** — decided view over incremental for staging: it's a thin rename/cast/dedupe with nothing expensive to amortize, always-fresh, zero stored copy, and Athena's column+partition pruning push *through* a view so it's near-free to re-run. Incremental/Iceberg is reserved for the marts where volume + compute justify the stateful machinery. Source declared in `_coinbase__sources.yml` (raw `crypto_raw.coinbase_ohlcv`); model renames open/high/low/close → `*_price`, drops impossible bars (null close, neg volume, high<low), dedupes to one row per `(asset_id, event_at)` via `row_number()`. Schema tests + dbt_utils grain-uniqueness test in `_stg_coinbase__models.yml`.
+- **Verified:** `dbt run` green, `dbt test` PASS=5/5, and a `dbt show` count proves the view is exactly 1:1 with raw — **180,236 rows, 2 assets, 2026-03-24 → 05-26** (matches the 5/29 Athena healthcheck).
+
+**Learned (the IAM iteration, as the spec predicted):**
+- The 5/29 `athena-query` policy was deliberately **read-only on Glue**, so `dbt run` walked through a precise staircase of AccessDenied errors, each naming the next missing action: first `glue:CreateDatabase` (dbt auto-creates the model's schema db), then `glue:GetTableVersions` (dbt-athena's post-create version bookkeeping). Granted exactly those, scoped by resource ARN to **only `crypto_staging` + `crypto_marts`** — `crypto_raw` stays read-only to dbt. New artifact `docs/setup/iam/dbt-glue-write-policy.json`.
+- **Inline-policy 2048-char wall.** Adding this as a *third inline* policy tripped IAM's "aggregate of all inline policies on a user ≤ 2048 non-whitespace chars" limit. Fix = make it a **customer-managed** policy (6144-char budget each, doesn't count against the inline aggregate, reusable, AWS-recommended). Editing a managed policy creates a new default version in place — no re-attach. Clean portfolio story: query-read and model-write are two separate, purpose-named policies, permissions grown exactly when a new capability needed them.
+- A `dbt run` can mark a model ERROR on a *post-materialization* step (the `GetTableVersions` denial) while the view itself was already created — the tip-off was `dbt test` passing against the "failed" model. Errors aren't always all-or-nothing; read what step actually failed.
+
+**▶ PICK UP HERE NEXT TIME — intermediate layer: `int_price_features.sql`.** Staging is green; next is feature computation per source. Concrete:
+1. `models/intermediate/int_price_features.sql` over `{{ ref('stg_coinbase_ohlcv') }}` — per-`(asset_id, event_at)` features: 5/15/60-min returns, rolling realized volatility, RSI, Bollinger position. Compute with window functions **partitioned by `asset_id`, ordered by `event_at`** (never cross assets — discipline #9, no BTC-hardcoded logic). Likely `materialized: ephemeral` or `view`.
+2. Watch for the **PIT trap** even here: every window must look *backward only* (`rows between N preceding and current row`), never `following` — that discipline is what the crown-jewel `fct_features_pit` test will later prove.
+3. Then the mart `fct_features_pit` (Iceberg, incremental, `unique_key=['asset_id','event_at']`) + the custom recompute-from-raw singular test.
+
+**Context for a fresh chat:** read this entry + the two memory files. dbt work is on branch `phase1/athena-pivot-and-ingestion`, not yet committed this session.
+
+---
+
 ## 2026-05-29 — Athena warehouse stood up over the raw zone; healthcheck green
 
 **Did:**

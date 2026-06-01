@@ -1,0 +1,27 @@
+name: 'crypto_de'
+version: '1.0.0'
+config-version: 2
+
+# Which profile (connection) in profiles.yml this project uses.
+profile: 'crypto_de'
+
+model-paths: ["models"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+analysis-paths: ["analyses"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Per-layer materialization defaults. Any model can override with its own
+# config() block, but the folder-level default is what we reach for first.
+models:
+  crypto_de:
+    staging:
+      # Staging is a thin rename/cast over raw — cheap to re-run, always fresh,
+      # zero stored copy. Incremental/Iceberg is reserved for the marts where
+      # the volume and compute actually justify the stateful machinery.
+      +materialized: view

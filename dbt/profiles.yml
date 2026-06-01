@@ -1,0 +1,19 @@
+# Athena connection profile. Safe to commit: there are NO secrets here — Athena
+# auth comes from the AWS credential chain (~/.aws/credentials), and everything
+# below is either a literal or an env_var() reference resolved at runtime.
+#
+# dbt is told to find this file via DBT_PROFILES_DIR=./ (run from the dbt/ dir).
+crypto_de:
+  target: dev
+  outputs:
+    dev:
+      type: athena
+      # Athena catalog (NOT the Glue database). Always awsdatacatalog here.
+      database: awsdatacatalog
+      # Glue database where dbt writes the models for this target.
+      schema: crypto_staging
+      region_name: "{{ env_var('AWS_REGION') }}"
+      work_group: "{{ env_var('ATHENA_WORKGROUP') }}"
+      # Where Athena writes query results — the athena-results/ prefix, outside raw/.
+      s3_staging_dir: "{{ env_var('ATHENA_S3_STAGING_DIR') }}"
+      threads: 4

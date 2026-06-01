@@ -1,0 +1,63 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DbtCreateModelDatabases",
+      "Effect": "Allow",
+      "Action": [
+        "glue:CreateDatabase",
+        "glue:GetDatabase",
+        "glue:GetDatabases"
+      ],
+      "Resource": [
+        "arn:aws:glue:us-east-1:546712138633:catalog",
+        "arn:aws:glue:us-east-1:546712138633:database/crypto_staging",
+        "arn:aws:glue:us-east-1:546712138633:database/crypto_marts"
+      ]
+    },
+    {
+      "Sid": "DbtManageModelTables",
+      "Effect": "Allow",
+      "Action": [
+        "glue:CreateTable",
+        "glue:UpdateTable",
+        "glue:DeleteTable",
+        "glue:GetTable",
+        "glue:GetTables",
+        "glue:BatchDeleteTable",
+        "glue:GetTableVersion",
+        "glue:GetTableVersions",
+        "glue:DeleteTableVersion",
+        "glue:BatchDeleteTableVersion"
+      ],
+      "Resource": [
+        "arn:aws:glue:us-east-1:546712138633:catalog",
+        "arn:aws:glue:us-east-1:546712138633:database/crypto_staging",
+        "arn:aws:glue:us-east-1:546712138633:database/crypto_marts",
+        "arn:aws:glue:us-east-1:546712138633:table/crypto_staging/*",
+        "arn:aws:glue:us-east-1:546712138633:table/crypto_marts/*"
+      ]
+    },
+    {
+      "Sid": "DbtManageMartPartitions",
+      "Effect": "Allow",
+      "Action": [
+        "glue:CreatePartition",
+        "glue:UpdatePartition",
+        "glue:DeletePartition",
+        "glue:GetPartition",
+        "glue:GetPartitions",
+        "glue:BatchCreatePartition",
+        "glue:BatchDeletePartition",
+        "glue:BatchGetPartition"
+      ],
+      "Resource": [
+        "arn:aws:glue:us-east-1:546712138633:catalog",
+        "arn:aws:glue:us-east-1:546712138633:database/crypto_staging",
+        "arn:aws:glue:us-east-1:546712138633:database/crypto_marts",
+        "arn:aws:glue:us-east-1:546712138633:table/crypto_staging/*",
+        "arn:aws:glue:us-east-1:546712138633:table/crypto_marts/*"
+      ]
+    }
+  ]
+}

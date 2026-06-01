@@ -1,0 +1,35 @@
+version: 2
+
+sources:
+  - name: coinbase
+    description: >
+      Raw Coinbase OHLCV bars landed in the S3 raw zone by the Python ingestion
+      pipeline and exposed via a Glue external table with partition projection
+      on dt. This is the single source of truth; dbt reads it in place.
+    database: awsdatacatalog   # Athena catalog
+    schema: crypto_raw         # Glue database holding the external table
+    tables:
+      - name: coinbase_ohlcv
+        description: >
+          1-minute OHLCV bars, one Parquet file per (asset_id, dt) partition.
+          dt lives in the S3 key (Hive-style), derived by partition projection —
+          it is not a Parquet column.
+        columns:
+          - name: asset_id
+            description: "Trading pair, e.g. BTC-USD."
+          - name: event_at
+            description: "Bar open time, UTC, microsecond precision."
+          - name: open
+            description: "Open price (USD)."
+          - name: high
+            description: "High price (USD)."
+          - name: low
+            description: "Low price (USD)."
+          - name: close
+            description: "Close price (USD)."
+          - name: volume
+            description: "Base-asset volume traded during the bar."
+          - name: ingested_at
+            description: "Wall-clock UTC time the ingestion run wrote this row."
+          - name: dt
+            description: "Partition key (YYYY-MM-DD), from the S3 path, not the Parquet file."
