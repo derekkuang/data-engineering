@@ -4,6 +4,31 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-06-01 — Directional pivot (BTC 15-min + Kalshi) decided; int_price_features built
+
+**Decided (the big one — a deliberate framing change):**
+- **ML target is now BTC 15-minute up/down (directional)**, overriding the original "avoid directional, do volatility-nowcasting" framing rule. Reason it's defensible and not the naive-predictor trap: it's **anchored to Kalshi**, which runs liquid 15-min BTC up/down *binary* markets (~$70M/day) — so the market price IS an implied probability. Kalshi gives all three at once: the **benchmark** (beat the market-implied prior), a **tradable instrument** for a cost-aware backtest, and **exact 15-min horizon alignment**. The integrity guardrail is preserved, not dropped: walk-forward only, net of Kalshi spread/fees, benchmarked vs implied prob; honest bar = "beat the market after costs," not "profitable predictor." The label (sign of forward 15-min return) is forward-looking → stays OUT of `fct_features_pit`, joined only at train time.
+- Verified Kalshi reality before committing (good instinct — it flipped two of my assumptions): 15-min BTC markets DO exist and are liquid; `GetMarketCandlesticks` (1/60/1440-min) makes historical backtest data fetchable; RSA-PSS auth; demo env at `demo-api.kalshi.co`. New raw source planned: `kalshi_btc_15min`. (Aside: CFTC approved Kalshi BTCPERP perp on 5/29 — brand new, ~no history, NOT the v1 instrument; the binary 15-min market is.) Captured in memory `reference_kalshi_api.md`.
+- Scope calls: near-real-time **batch** via the planned 15-min Airflow DAG (live streaming deferred); Kalshi used as **benchmark + cost-aware trading backtest**.
+
+**Did (modeling):**
+- Built `models/intermediate/int_price_features.sql` (a **view**) — ~25 price/volume features per `(asset_id, event_at)` tuned for the directional target: multi-horizon log returns (1/5/15/60m), realized vol (rv 15/30/60m + short/long ratio), **range-based vol (Parkinson, Garman-Klass)** from the OHLC, ATR(14), **SMA-based RSI(14)** (chose SMA over recursive Wilder/EMA — negligible ML diff, SQL-clean), SMA-distance, Bollinger z-score, volume baselines (rel-volume, dollar-volume, signed-volume order-flow proxy), and PIT-safe calendar features (incl. sin/cos minute-of-day). Deferred rolling skew/kurtosis to v1.1 (tail/vol measures, little *directional* signal — start lean, add by feature importance).
+- **The PIT rehearsal:** every rolling feature uses an EXPLICIT `rows between N preceding and current row` backward frame (never the default cumulative frame, never `following`), partitioned by `asset_id` so BTC windows never see ETH. This is the exact property the `fct_features_pit` crown-jewel test will later prove.
+- Structured as layered CTEs (lags → per-bar building blocks → rolling aggregates → final ratios); used a named `WINDOW w` clause (Athena/Trino supports it). `dbt run`+`dbt test` green (PASS, grain unique + key not-nulls). Sanity-checked recent BTC rows: RSI in 0-100, tiny signed returns, positive vols. Note: feature cols are intentionally NOT `not_null`-tested — first ~60 bars/asset are warmup nulls by design.
+
+**Learned (smaller):**
+- `dbt show` appends its own LIMIT — pass `--limit N`, don't put `limit` in the inline SQL (double-LIMIT = parse error), and `--output` only takes `json`/`text`.
+- Row-based frames assume contiguous minutes; BTC/ETH have ~0.7% missing bars, so "15 preceding rows" can span slightly >15 min. Accepted v1 simplification; documented the spine+forward-fill fix as future work.
+
+**▶ PICK UP HERE NEXT TIME — decide next unit, then build:**
+- **Option A (recommended): `fct_features_pit` mart** — Iceberg, incremental (`unique_key=['asset_id','event_at']`), built from `int_price_features` (price-only PIT store v1; Kalshi feature + label join in later). Then the **custom PIT singular test** (recompute a sample row from raw, assert equality) — the project's signature. This needs the dbt-glue-write policy's partition/Iceberg perms (already granted).
+- **Option B: Kalshi ingestion** — new Python module (RSA-PSS auth, demo env first), land `kalshi_btc_15min` Parquet in S3, Glue external table, then join into the mart.
+- Lean A first (delivers the crown jewel on data we already have), then B.
+
+**Context for a fresh chat:** read this entry + the three memory files (project, collaboration, kalshi-api). dbt work on branch `phase1/athena-pivot-and-ingestion`; staging committed (9f88bfc), intermediate uncommitted.
+
+---
+
 ## 2026-05-31 — dbt-athena stood up; first staging model (view) green end-to-end
 
 **Did:**

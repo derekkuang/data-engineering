@@ -1,0 +1,79 @@
+version: 2
+
+models:
+  - name: int_price_features
+    description: >
+      Per-(asset_id, event_at) price/volume features for the 15-min directional
+      model: multi-horizon log returns, realized + range-based volatility
+      (Parkinson, Garman-Klass), ATR, SMA-based RSI, moving-average distances,
+      Bollinger z-score, volume baselines, and PIT-safe calendar features. All
+      rolling windows are backward-only (rows between N preceding and current
+      row), partitioned by asset_id. The first ~60 bars per asset are warmup and
+      carry nulls for the longer-window features by design.
+    columns:
+      - name: asset_id
+        description: "Trading pair, e.g. BTC-USD."
+        tests:
+          - not_null
+      - name: event_at
+        description: "Bar open time, UTC, microsecond precision."
+        tests:
+          - not_null
+      - name: close_price
+        description: "Bar close price (USD), passed through for downstream label/return computation."
+      - name: log_return_1m
+        description: "1-minute close-to-close log return."
+      - name: log_return_5m
+        description: "5-minute close-to-close log return."
+      - name: log_return_15m
+        description: "15-minute close-to-close log return."
+      - name: log_return_60m
+        description: "60-minute close-to-close log return."
+      - name: rv_15m
+        description: "Realized volatility: rolling sample std of 1-min log returns over 15 bars."
+      - name: rv_30m
+        description: "Realized volatility over 30 bars."
+      - name: rv_60m
+        description: "Realized volatility over 60 bars."
+      - name: rv_ratio_15_60
+        description: "rv_15m / rv_60m — short-vs-long vol (volatility expansion/contraction)."
+      - name: parkinson_30m
+        description: "Parkinson high-low range volatility estimator over 30 bars."
+      - name: garman_klass_30m
+        description: "Garman-Klass OHLC volatility estimator over 30 bars."
+      - name: hl_range_pct
+        description: "(high - low) / close for the current bar."
+      - name: atr_14
+        description: "Average true range over 14 bars (SMA-based)."
+      - name: rsi_14
+        description: "Relative Strength Index over 14 bars (SMA-based avg gain/loss), 0-100."
+      - name: dist_sma_20
+        description: "close / SMA(20) - 1 — distance above/below the 20-bar mean."
+      - name: dist_sma_60
+        description: "close / SMA(60) - 1 — distance above/below the 60-bar mean."
+      - name: bb_z_20
+        description: "(close - SMA20) / std20 — Bollinger z-score (stretch from fair value)."
+      - name: volume
+        description: "Base-asset volume for the current bar."
+      - name: rel_volume_20
+        description: "volume / SMA(20) of volume — relative volume."
+      - name: dollar_volume
+        description: "close * volume."
+      - name: signed_volume
+        description: "sign(close - open) * volume — intrabar order-flow direction proxy."
+      - name: minute_of_day
+        description: "Minutes since UTC midnight (0-1439)."
+      - name: hour_of_day
+        description: "UTC hour (0-23)."
+      - name: day_of_week
+        description: "Day of week, 1=Monday .. 7=Sunday."
+      - name: minute_sin
+        description: "sin encoding of minute_of_day (cyclical time feature)."
+      - name: minute_cos
+        description: "cos encoding of minute_of_day (cyclical time feature)."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - asset_id
+              - event_at

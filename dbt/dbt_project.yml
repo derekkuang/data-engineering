@@ -25,3 +25,8 @@ models:
       # zero stored copy. Incremental/Iceberg is reserved for the marts where
       # the volume and compute actually justify the stateful machinery.
       +materialized: view
+    intermediate:
+      # Feature computation per source. A view keeps it inspectable/testable
+      # while developing; it's still just SQL pushed down to Athena at query
+      # time. Incremental/Iceberg is reserved for the marts.
+      +materialized: view
