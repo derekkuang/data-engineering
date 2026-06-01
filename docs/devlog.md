@@ -24,7 +24,7 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 3. Then a `stg_kalshi_*` view + join the implied-prob feature into `fct_features_pit`; define the forward 15-min up/down **label** (separate, NOT in the PIT store).
 4. See memory `reference_kalshi_api.md` for endpoints/auth and `project` memory for the trading/eval policy (edge-bet hold-to-expiry; metric = calibration + cost-aware PnL).
 
-**Context for a fresh chat:** read this entry + the 3 memory files. dbt on branch `phase1/athena-pivot-and-ingestion`; staging+intermediate committed (9f88bfc, 35f7721), mart+PIT test uncommitted as of writing this line.
+**Context for a fresh chat:** read this entry + the 3 memory files (project, collaboration, kalshi-api). All Phase-1 dbt work is COMMITTED on branch `phase1/athena-pivot-and-ingestion` (staging 9f88bfc, intermediate 35f7721, mart+PIT test cbd139a); working tree clean. To run dbt: `cd dbt && set -a && . ../.env && set +a && export DBT_PROFILES_DIR="$PWD"` then `uv run dbt run/test`. Next session starts on Kalshi ingestion (steps above).
 
 ---
 
