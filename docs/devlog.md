@@ -4,6 +4,36 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-06-01 — Kalshi 15-min BTC ingestion: public data, backfill + live DAG (both green)
+
+**Big pivot (made the unit far simpler):** verified via docs that **Kalshi market-data endpoints — markets + candlesticks — are PUBLIC and unauthenticated** on prod (`https://external-api.kalshi.com/trade-api/v2`). We only need read-only price/implied-prob and never place orders, so **no API key / demo env / KYC is needed**. Also confirmed the demo env lacks real activity, so we use **prod market data, read-only** ("monitor price/action, no trades"). The RSA-PSS signer is still built in `ingestion/kalshi.py` but optional (public mode by default).
+
+**Instrument discovered:** series **`KXBTC15M`** = market **"BTC price up in next 15 mins?"** (e.g. `KXBTC15M-26JUN011745-45`). Each settled market = one 15-min window; its 1-min candlesticks give everything the goal needs at once:
+- `price.*_dollars` (0..1) = **implied probability** → benchmark + feature
+- `yes_bid`/`yes_ask` = the **spread** = transaction cost (cost-aware PnL)
+- market `result` (yes/no) = the up/down **label** (forward-looking → stays OUT of the PIT mart)
+
+**Built + verified:**
+- `ingestion/kalshi.py` — public/optional-auth client (retry+backoff, 0.5s pacing for the rate limit), `list_markets` (cursor pagination), `get_market_candlesticks`, `KalshiCandle` + `normalize_market_candles`. Public healthcheck `scripts/healthcheck_kalshi.py` green.
+- `ingestion/kalshi_storage.py` — S3 Parquet writer, explicit schema = Glue DDL contract, one file per `dt` (window open date), idempotent overwrite. `ingestion/kalshi_backfill.py` — `backfill(days)` (settled history) + `ingest_current_day()` (re-fetch today, overwrite — the live contract).
+- **Backfilled 7 days** → 8 partitions, ~11k candles in `s3://.../raw/kalshi_btc_15min/dt=.../`.
+- **Live Airflow task** `ingest_kalshi_15m` added to `crypto_price_ingest` (parallel to the OHLCV mapped tasks). Added `cryptography` to `airflow/requirements.txt` + `KALSHI_API_BASE` to `airflow/.env`, rebuilt the image; **task ran green in-container**: `{'markets': 97, 'candles': 1432, 'files': 2}` written to S3.
+- Glue external table DDL written to `docs/setup/05-kalshi-ingestion.md` with partition projection.
+
+**Learned / gotchas:**
+- The **Glue table is a USER action**: the least-priv `crypto-de-pipeline` user is read-only on `crypto_raw`, so `CREATE EXTERNAL TABLE crypto_raw.kalshi_btc_15min` fails with `AccessDenied: glue:CreateTable` — must be run with owner/admin (Athena console), same as `coinbase_ohlcv`. DDL is in `docs/setup/05`.
+- Public API **rate-limits (429)** quickly → client paces 0.5s/call + exponential backoff; backfill of 7 days (~660 markets) ran clean in ~3.5 min.
+- During setup the demo key got pasted into `KALSHI_PRIVATE_KEY_PATH` (the field wants a *file path*) and a fragment surfaced in a tool error. Since we dropped auth, `.env` was cleaned to public config — **the unused demo key can be deleted in Kalshi** for hygiene.
+
+**▶ PICK UP HERE NEXT TIME:**
+1. **USER:** run the Glue DDL in `docs/setup/05-kalshi-ingestion.md` (Athena console, owner perms), then the verify `SELECT` should work as the pipeline user.
+2. **dbt layer:** `stg_kalshi_btc_15min` (view over the raw table) → join the implied-prob as a **PIT-safe feature** into `fct_features_pit` (only data with `event_at <= T`); define the **forward 15-min up/down label** from `result` in a SEPARATE model (NOT in the PIT store).
+3. Then the **model + walk-forward backtest** (Kalshi-benchmarked, net of spread/fees) and the Streamlit dashboard.
+
+**Context for a fresh chat:** branch `phase1/athena-pivot-and-ingestion`. Kalshi work this session: new `ingestion/kalshi*.py`, `scripts/healthcheck_kalshi.py`, `docs/setup/05-kalshi-ingestion.md`, live task in `airflow/dags/crypto_price_ingest.py`, `cryptography` dep; `.env`/`.env.example` switched to public Kalshi config (`airflow/.env` gitignored holds `KALSHI_API_BASE`). 7 days of `kalshi_btc_15min` Parquet in S3. Local Airflow + Colima may still be running (`astro dev stop` + `colima stop` to shut down).
+
+---
+
 ## 2026-06-01 — Resume-gap session: GitHub Actions CI (OIDC) + first runnable Airflow DAG
 
 **Why this session (deliberate detour from the Kalshi plan):** a critical project review found the data layer (dbt + PIT + Iceberg) genuinely strong but the resume-legible pieces empty — Airflow, ML, dashboard, CI were all `.gitkeep` stubs while the README's resume bullets claimed Airflow DAGs, "40+ tests", CI, and a dashboard that don't exist. Chose to close the two highest-ratio gaps (CI + a real Airflow DAG) and fix the false claims, before resuming Kalshi.

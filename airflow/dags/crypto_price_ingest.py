@@ -1,4 +1,4 @@
-"""crypto_price_ingest — land fresh Coinbase OHLCV bars in the S3 raw zone.
+"""crypto_price_ingest — land fresh Coinbase OHLCV + Kalshi 15-min implied-prob in S3.
 
 Runs every 15 minutes. For each product it re-fetches the *current UTC day* from
 00:00 to now and overwrites that day's partition file in S3.
@@ -13,13 +13,14 @@ partition" contract. Cost stays bounded (one day = at most 1,440 one-minute bars
 Task shape (Airflow 3 TaskFlow + dynamic task mapping):
 
     ingest_product["BTC-USD"]  ┐
-                               ├──► summarize_ingest
-    ingest_product["ETH-USD"]  ┘
+    ingest_product["ETH-USD"]  ┼──► summarize_ingest
+    ingest_kalshi_15m          ┘
 
 ``ingest_product`` is mapped over the product list, so the two assets ingest in
-parallel and adding a third pair later is a one-line change. Imports of the
-``ingestion`` package are done *inside* the task so the DAG parses even where that
-package or its deps aren't installed (e.g. the bare parse test).
+parallel and adding a third pair later is a one-line change. ``ingest_kalshi_15m``
+re-fetches the current UTC day's KXBTC15M markets. Imports of the ``ingestion``
+package are done *inside* each task so the DAG parses even where that package or
+its deps aren't installed (e.g. the bare parse test).
 """
 
 from __future__ import annotations
@@ -63,8 +64,17 @@ def crypto_price_ingest():
         }
 
     @task
-    def summarize_ingest(results: list[dict]) -> None:
-        """Fail loudly if any product landed zero rows; otherwise log the totals.
+    def ingest_kalshi_15m() -> dict:
+        """Re-fetch the current UTC day's KXBTC15M markets (implied-prob path,
+        bid/ask spread, settled results) and overwrite that day's S3 partition —
+        same idempotent re-fetch-the-day contract as the Coinbase task."""
+        from ingestion.kalshi_backfill import ingest_current_day
+
+        return ingest_current_day()
+
+    @task
+    def summarize_ingest(results: list[dict], kalshi: dict) -> None:
+        """Fail loudly if Coinbase landed zero rows; otherwise log the totals.
 
         Gating on row counts here is the seed of load-level data-quality checks
         (row-count anomaly detection is noted as future work in the README)."""
@@ -74,11 +84,15 @@ def crypto_price_ingest():
         total_rows = sum(r["rows"] for r in results)
         for r in results:
             log.info("ingested %(rows)s rows for %(product)s -> dt=%(day)s", r)
+        log.info("kalshi: %(markets)s markets, %(candles)s candles, %(files)s file(s)", kalshi)
         if total_rows == 0:
-            raise ValueError("ingest landed 0 rows across all products — upstream API issue?")
-        log.info("crypto_price_ingest OK: %d rows across %d product(s)", total_rows, len(results))
+            raise ValueError("Coinbase ingest landed 0 rows — upstream API issue?")
+        log.info(
+            "crypto_price_ingest OK: %d Coinbase rows + %d Kalshi candles",
+            total_rows, kalshi["candles"],
+        )
 
-    summarize_ingest(ingest_product.expand(product=PRODUCTS))
+    summarize_ingest(ingest_product.expand(product=PRODUCTS), ingest_kalshi_15m())
 
 
 crypto_price_ingest()
