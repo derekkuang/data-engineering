@@ -1,0 +1,24 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CiListRawBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": "arn:aws:s3:::derekkuang-crypto-de-raw-546712138633-us-east-1-an"
+    },
+    {
+      "Sid": "CiReadRawWriteResultsAndMarts",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::derekkuang-crypto-de-raw-546712138633-us-east-1-an/*"
+    }
+  ]
+}

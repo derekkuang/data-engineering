@@ -1,0 +1,7 @@
+# Astro Runtime includes Airflow + standard provider packages. These are the
+# extra runtime deps the ingestion package needs when its tasks execute
+# in-container. Kept in sync with the repo's pyproject.toml ingestion deps.
+httpx>=0.27.0
+boto3>=1.43.0
+pandas>=3.0.0
+pyarrow>=24.0.0

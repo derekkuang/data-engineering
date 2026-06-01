@@ -12,6 +12,25 @@ Build a production-grade ELT pipeline that ingests crypto market and on-chain da
 
 ---
 
+**Project Status** (updated 2026-06-01) — the rest of this README describes the full target architecture; this table is the source of truth for what actually exists today.
+
+| Component | Status | Notes |
+|---|---|---|
+| Coinbase → S3 ingestion | ✅ Built | Paginated, rate-limited, idempotent Parquet writes; BTC + ETH 1-min, ~180k rows |
+| Athena + Glue over S3 raw | ✅ Built | External table, partition projection, least-privilege IAM, healthcheck |
+| dbt staging + intermediate | ✅ Built | `stg_coinbase_ohlcv` (view), `int_price_features` (~25 features, view) |
+| dbt mart + PIT test | ✅ Built | `fct_features_pit` (incremental Iceberg/MERGE) + custom point-in-time singular test |
+| GitHub Actions CI (OIDC → `dbt build`) | 🟡 Configured | Workflow + IAM JSON written; goes green after one-time OIDC setup (`docs/setup/04`) |
+| Airflow `crypto_price_ingest` DAG | ✅ Built | Astro Runtime 3 / Airflow 3, dynamic task mapping; runs locally |
+| Kalshi ingestion + directional label | ⬜ Planned | Next unit — 15-min BTC binary market implied-prob + forward label |
+| `crypto_features_refresh` DAG (run→test→inference) | ⬜ Planned | The second DAG; quality-gated inference |
+| ML model + walk-forward backtest | ⬜ Planned | Kalshi-benchmarked, cost-aware |
+| Streamlit dashboard | ⬜ Planned | Features + predictions + PnL |
+
+> **Scope note:** the ML target is now **BTC 15-minute directional**, benchmarked against Kalshi's liquid 15-min binary markets and judged cost-aware (calibration + PnL net of spread/fees) — a deliberate change from the original volatility-nowcasting framing. Some sections below (on-chain Etherscan source, volatility-nowcast Q&A, the four-mart diagram) still describe the *original* plan and are being reconciled.
+
+---
+
 **The Stack**
 
 - **Ingestion:** Python scripts pulling from Coinbase Exchange (price) and Etherscan / mempool.space (on-chain), watermark-driven incremental loads
@@ -136,7 +155,9 @@ select * from cleaned
 
 **Airflow — The Orchestration Layer**
 
-Run Airflow locally with Docker (Astronomer Astro CLI or the official `docker-compose.yaml`).
+Run Airflow locally with Docker (Astronomer Astro CLI). The project lives in `airflow/` (Astro Runtime 3 / Airflow 3); `astro dev start` brings up the stack.
+
+> **Status:** DAG 1 (`crypto_price_ingest`) is **built and runs** — see `airflow/dags/crypto_price_ingest.py`. It uses TaskFlow + dynamic task mapping over the product list. DAG 2 (`crypto_features_refresh`) is **planned**. The description below is the target design for both.
 
 **Two DAGs, not one.** Crypto data moves faster than the daily-batch pattern assumes, so split ingestion from transformation:
 
@@ -257,8 +278,16 @@ Secrets via Vault, not env files. Feature store (Feast) instead of a dbt mart fo
 
 **How To Frame It On Your Resume**
 
-- Built an incremental ELT pipeline ingesting minute-granularity OHLCV (Coinbase) and on-chain (Etherscan) data into an S3 Parquet lakehouse queried by Athena (Glue Data Catalog, partition projection, Iceberg marts); orchestrated with two Airflow DAGs (15-minute ingest, hourly feature refresh) and watermark-driven loads
-- Designed a dbt transformation layer producing a point-in-time-correct feature mart; wrote 40+ schema tests plus a custom singular test enforcing PIT correctness, all gated in GitHub Actions CI on every commit
-- Delivered a Streamlit analytics dashboard surfacing features, model predictions, and walk-forward backtest results with realistic transaction costs; honest reporting on out-of-sample model performance
+> **Only claim what is built and verified.** The bullets below describe the code
+> that exists in this repo today (see the Project Status table near the top).
+> Do not add the dashboard / model / second DAG bullets until those are shipped.
 
-Those three bullets demonstrate: incremental dbt, point-in-time correctness, Airflow with quality gating, CI for data, multi-source API ingestion. That is the exact skill stack DE postings ask for.
+*Accurate today:*
+
+- Built an incremental ELT lakehouse on AWS: Python ingestion of minute-granularity Coinbase OHLCV into an S3 Parquet raw zone (idempotent, partition-projected), queried in place by Athena via the Glue Data Catalog — no load step
+- Designed a dbt-athena medallion layer (staging → intermediate → marts) whose feature mart materializes as an **incremental Iceberg table with MERGE upserts**; engineered a point-in-time-correct feature store (~25 price/volatility/momentum features) and **proved it with a custom dbt singular test** that recomputes a feature from raw using only backward-looking data and asserts equality (demonstrated to fail under look-ahead)
+- Stood up **GitHub Actions CI running `dbt build`** (model run + schema/PIT tests) against Athena on every push, authenticating via **GitHub OIDC federation** into a scoped IAM role — no long-lived AWS keys stored; orchestrated ingestion with an **Airflow DAG** (Astro Runtime 3 / Airflow 3, dynamic task mapping) run locally
+
+*Add once built (currently planned — see Project Status):* hourly `dbt run → test → inference` feature-refresh DAG; Kalshi-benchmarked directional model with walk-forward backtest net of costs; Streamlit dashboard.
+
+The accurate bullets already demonstrate: incremental dbt, point-in-time correctness, Iceberg/lakehouse modeling, OIDC-secured CI for data, and API ingestion. That is the core of the DE skill stack — kept honest.

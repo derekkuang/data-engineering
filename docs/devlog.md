@@ -4,6 +4,38 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-06-01 — Resume-gap session: GitHub Actions CI (OIDC) + first runnable Airflow DAG
+
+**Why this session (deliberate detour from the Kalshi plan):** a critical project review found the data layer (dbt + PIT + Iceberg) genuinely strong but the resume-legible pieces empty — Airflow, ML, dashboard, CI were all `.gitkeep` stubs while the README's resume bullets claimed Airflow DAGs, "40+ tests", CI, and a dashboard that don't exist. Chose to close the two highest-ratio gaps (CI + a real Airflow DAG) and fix the false claims, before resuming Kalshi.
+
+**Did — CI (GitHub Actions, OIDC, no stored keys):**
+- `.github/workflows/ci.yml` runs `dbt build` (compile → run → schema/PIT **tests**) against Athena on every push/PR. Concurrency-serialized per ref (Iceberg `MERGE` isn't concurrency-safe on one table).
+- **AWS auth via GitHub OIDC federation** into a new role `crypto-de-ci` — the right call for a *public* repo (no long-lived keys anywhere). Wrote the role trust policy (`docs/setup/iam/github-oidc-trust-policy.json`), a CI S3 policy mirroring the user's inline S3 CRUD since a role can't inherit it (`ci-s3-access-policy.json`), and a step-by-step runbook (`docs/setup/04-github-oidc-ci.md`). The role reuses the existing athena-query + dbt-glue-write managed policies — same "grow perms deliberately" story, now on a federated role.
+- `dbt deps` + `dbt parse` green locally → the project CI builds is structurally sound. **CI goes green only after the one-time AWS OIDC console setup (still a USER TODO).**
+
+**Did — Airflow (Astro Runtime 3 / Airflow 3, RUNS):**
+- Stood up Colima (CLI-only Docker, no Docker Desktop) + Astro CLI; `astro dev init` in `airflow/`.
+- `dags/crypto_price_ingest.py` — TaskFlow + **dynamic task mapping** over the product list (`ingest_product.expand(...)` → `summarize_ingest`). Ingestion imports are **lazy (inside the task)** so the DAG parses without the ingestion deps. Structure test in `tests/dags/`.
+- **Ran it green end-to-end:** both mapped tasks (BTC-USD, ETH-USD) + summarize = success; **landed the `dt=2026-06-01` partition to real S3 — 1131 + 1131 = 2262 rows.** Verified the two Parquet files in the bucket + the task log line `crypto_price_ingest OK: 2262 rows`.
+- **Caught a real trap:** `storage.py` writes one file per `(asset, day)`, overwrite. A naive "fetch last 15 min and write" would clobber the day partition down to 15 min. So the DAG **re-fetches the current UTC day (00:00→now) and overwrites** — idempotent, no data loss, matches the backfill contract.
+
+**Learned (container wiring — the fiddly part):**
+- The `ingestion/` package lives at the repo root, **outside the Astro Docker build context**, so it can't be `COPY`'d. Solution: **bind-mount `../ingestion`** into the scheduler (where LocalExecutor runs tasks) at `/usr/local/airflow/vendor/ingestion`, with `PYTHONPATH=/usr/local/airflow/vendor`.
+- **Two different env mechanisms, easy to conflate:** (1) Astro injects the gitignored `airflow/.env` *into containers* (so PYTHONPATH + AWS creds reach the scheduler — env-var creds are the correct mechanism *inside* a container, distinct from the host where keys stay OUT of `.env`). (2) docker-compose `${VAR}` interpolation in the override file does **not** read `airflow/.env` → first start failed on `${INGESTION_SRC}` empty. Fix: a **relative** bind path (`../ingestion`), resolved against the project dir, no var needed.
+- Colima gotcha: first `colima start` hung in VM provisioning even though the guest image had cached (under `~/Library/Caches/colima/caches/`, not `~/.lima`); `colima delete -f` + retry booted cleanly on the `vz` driver. Astro auto-appends `astro-run-dag` to requirements; Airflow 3 runtime is Python 3.13.
+
+**Did — README honesty pass:**
+- Added a **Project Status table** (built ✅ vs planned ⬜) as the top-of-README source of truth; rewrote the **resume bullets** to claim only what exists (killed the false Etherscan / "40+ tests" / two-DAGs / dashboard / walk-forward claims, split into "accurate today" vs "add once built"); flagged the stale on-chain + vol-nowcast sections and the BTC-directional/Kalshi pivot.
+
+**▶ PICK UP HERE NEXT TIME:**
+1. **USER action:** run the AWS OIDC setup in `docs/setup/04-github-oidc-ci.md` (create OIDC provider + `crypto-de-ci` role + attach 3 policies), then push and confirm the `dbt CI` check goes green.
+2. **USER action:** grab the Airflow UI screenshot for the README — stack is running at **http://airflow.localhost:6563** (Astro default login `admin`/`admin`); screenshot the green `crypto_price_ingest` grid. Shut down with `astro dev stop` + `colima stop` when done.
+3. **Then resume the roadmap: Kalshi ingestion (Option B)** — the originally-planned next unit (RSA-PSS client, demo env, land `kalshi_btc_15min`, join implied-prob into the mart + define the forward label). See the prior two 2026-06-01 entries + `reference_kalshi_api.md`.
+
+**Context for a fresh chat:** branch `phase1/athena-pivot-and-ingestion`. **This session's work is UNCOMMITTED** — new: `.github/workflows/ci.yml`, `docs/setup/iam/{github-oidc-trust-policy,ci-s3-access-policy}.json`, `docs/setup/04-github-oidc-ci.md`, the whole `airflow/` Astro project; modified: `README.md`. `airflow/.env` is gitignored (holds AWS keys for the container). Local Airflow stack + Colima may still be running.
+
+---
+
 ## 2026-06-01 — CROWN JEWEL: fct_features_pit (Iceberg incremental) + PIT test, 12/12 green
 
 **Did:**

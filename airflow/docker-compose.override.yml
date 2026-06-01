@@ -1,0 +1,15 @@
+# Local-dev override layered on top of the compose stack the Astro CLI generates.
+#
+# The ingestion package lives at the repo root, OUTSIDE this Astro project's Docker
+# build context, so we can't COPY it into the image. Instead we bind-mount it into
+# the task-running container (scheduler runs tasks under the LocalExecutor) at a
+# path on PYTHONPATH. Single source of truth — no vendored copy.
+#
+# The host path is RELATIVE to this project dir (airflow/), so `../ingestion`
+# resolves to the repo-root ingestion package — portable, no machine-specific
+# path. PYTHONPATH + the AWS creds come from the gitignored .env, which the Astro
+# CLI injects into every container.
+services:
+  scheduler:
+    volumes:
+      - ../ingestion:/usr/local/airflow/vendor/ingestion:ro
