@@ -28,7 +28,9 @@ from __future__ import annotations
 import pendulum
 from airflow.decorators import dag, task
 
-PRODUCTS = ["BTC-USD", "ETH-USD"]
+# BTC only — the model targets BTC 15-min direction (Kalshi KXBTC15M). The task is
+# still dynamically mapped over this list, so adding ETH back is a one-line change.
+PRODUCTS = ["BTC-USD"]
 
 
 @dag(
