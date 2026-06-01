@@ -1,6 +1,6 @@
 # Athena + S3 Setup Spec
 
-**Status:** not started (2026-05-22). This is the **active** warehouse setup; it supersedes [`02-snowflake-s3.md`](02-snowflake-s3.md) (Snowflake's free trial disappeared — see that doc's banner) and [`01-gcp-bigquery.md`](01-gcp-bigquery.md).
+**Status:** ✅ stood up + healthchecked (2026-05-29) — workgroup, Glue DB, external table, and query IAM all live; `scripts/healthcheck_athena.py` passes (180,236 rows over 64 day-partitions). Next layer is dbt-athena staging. This is the **active** warehouse setup; it supersedes [`02-snowflake-s3.md`](02-snowflake-s3.md) (Snowflake's free trial disappeared — see that doc's banner) and [`01-gcp-bigquery.md`](01-gcp-bigquery.md).
 
 **Decision:** warehouse = **Amazon Athena**, querying raw Parquet in the existing S3 landing zone **in place** via the Glue Data Catalog. Chosen after Snowflake's only remaining trial became a card-gated $20/month subscription. Athena wins on: zero rework (reuses the S3 bucket + `crypto-de-pipeline` IAM already built), serverless pay-per-scan (~cents at this data volume), **no expiry clock** (the warehouse can stay live for the Loom/dashboard indefinitely), and it *is* the lakehouse pattern this project is designed around — Parquet-in-S3 as the single source of truth, queried without a load step. Phase-3 PySpark stays all-AWS (Glue/EMR).
 
@@ -110,13 +110,17 @@ GROUP BY dt ORDER BY dt;
 
 ## Phase 4 — IAM: let `crypto-de-pipeline` query Athena
 
-Attach an inline policy giving the existing user Athena + Glue read and result-location read/write. (S3 read on `raw/*` it already has from the ingestion policy.)
+The user already has object CRUD + `ListBucket` on the S3 bucket from the original ingestion policy, which covers reading/writing the `athena-results/*` prefix. Missing pieces this policy adds: the Athena query lifecycle, read access to the Glue catalog under `crypto_raw`, and **`s3:GetBucketLocation`** — the one bucket-metadata action the ingestion policy lacked, which Athena calls to verify the results bucket before every query (the healthcheck surfaced this as `Unable to verify/create output bucket`; see devlog 2026-05-29).
 
-- `athena:StartQueryExecution`, `GetQueryExecution`, `GetQueryResults`, `StopQueryExecution`, `GetWorkGroup`
-- `glue:GetDatabase*`, `GetTable*`, `GetPartition*` (and `Create*`/`Update*` once dbt manages staging/marts)
-- `s3:GetObject`/`PutObject`/`ListBucket` scoped to the `athena-results/*` prefix
+Policy committed in the repo as **[`iam/athena-query-policy.json`](iam/athena-query-policy.json)**. It's deliberately *read-only on Glue* at this stage — dbt will need `Create*`/`Update*`/`Delete*` on Glue tables and partitions later, which we'll add as a second deliberate policy iteration (matches least-privilege properly, gives us a clean "grew permissions as needed" portfolio story).
 
-Claude can author and apply this via the AWS CLI once we get here.
+**Apply (console, one-time, requires admin identity):**
+
+1. IAM → Users → `crypto-de-pipeline` → Permissions → Add permissions → Create inline policy
+2. JSON tab → paste the contents of [`iam/athena-query-policy.json`](iam/athena-query-policy.json)
+3. Name it `crypto-de-pipeline-athena-query` → Create policy
+
+After this is attached, every remaining step in this spec runs under `crypto-de-pipeline` via the local CLI.
 
 ## Phase 5 — `.env` + dbt
 

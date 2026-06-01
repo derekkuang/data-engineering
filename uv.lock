@@ -122,6 +122,7 @@ dependencies = [
     { name = "httpx" },
     { name = "pandas" },
     { name = "pyarrow" },
+    { name = "pyathena" },
     { name = "python-dotenv" },
 ]
 
@@ -138,6 +139,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "pandas", specifier = ">=3.0.3" },
     { name = "pyarrow", specifier = ">=24.0.0" },
+    { name = "pyathena", specifier = ">=3.31.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
 ]
 
@@ -146,6 +148,15 @@ dev = [
     { name = "mypy", specifier = ">=1.11.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "ruff", specifier = ">=0.6.0" },
+]
+
+[[package]]
+name = "fsspec"
+version = "2026.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d5/8d/1c51c094345df128ca4a990d633fe1a0ff28726c9e6b3c41ba65087bba1d/fsspec-2026.4.0.tar.gz", hash = "sha256:301d8ac70ae90ef3ad05dcf94d6c3754a097f9b5fe4667d2787aa359ec7df7e4", size = 312760, upload-time = "2026-04-29T20:42:38.635Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d5/0c/043d5e551459da400957a1395e0febbf771446ff34291afcbe3d8be2a279/fsspec-2026.4.0-py3-none-any.whl", hash = "sha256:11ef7bb35dab8a394fde6e608221d5cf3e8499401c249bebaeaad760a1a8dec2", size = 203402, upload-time = "2026-04-29T20:42:36.842Z" },
 ]
 
 [[package]]
@@ -509,6 +520,22 @@ wheels = [
 ]
 
 [[package]]
+name = "pyathena"
+version = "3.31.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "boto3" },
+    { name = "botocore" },
+    { name = "fsspec" },
+    { name = "python-dateutil" },
+    { name = "tenacity" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/01/20/f8386a2eaab144e845b06a545409839f1171ae2cc4bc694da53adcd59288/pyathena-3.31.0.tar.gz", hash = "sha256:fd1bb98ab4ea2b2c4afe2e3ac2b6d3fb78bc43ea259425b5c532a29c03e2c2c3", size = 135535, upload-time = "2026-05-24T05:53:46.647Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1c/d3/9565c7b0e13a26bf5461617d358519f7645c1580abd9ddfb7996cac2a0f3/pyathena-3.31.0-py3-none-any.whl", hash = "sha256:4574155e615579165d8afd1e02c72e9fcb4ae987212f59e02099a88cf8ed3648", size = 191294, upload-time = "2026-05-24T05:53:44.726Z" },
+]
+
+[[package]]
 name = "pygments"
 version = "2.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -598,6 +625,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
+]
+
+[[package]]
+name = "tenacity"
+version = "9.1.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/47/c6/ee486fd809e357697ee8a44d3d69222b344920433d3b6666ccd9b374630c/tenacity-9.1.4.tar.gz", hash = "sha256:adb31d4c263f2bd041081ab33b498309a57c77f9acf2db65aadf0898179cf93a", size = 49413, upload-time = "2026-02-07T10:45:33.841Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/c1/eb8f9debc45d3b7918a32ab756658a0904732f75e555402972246b0b8e71/tenacity-9.1.4-py3-none-any.whl", hash = "sha256:6095a360c919085f28c6527de529e76a06ad89b23659fa881ae0649b867a9d55", size = 28926, upload-time = "2026-02-07T10:45:32.24Z" },
 ]
 
 [[package]]

@@ -1,0 +1,56 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AthenaQueryLifecycleOnCryptoWorkgroup",
+      "Effect": "Allow",
+      "Action": [
+        "athena:StartQueryExecution",
+        "athena:GetQueryExecution",
+        "athena:GetQueryResults",
+        "athena:GetQueryResultsStream",
+        "athena:StopQueryExecution",
+        "athena:GetWorkGroup",
+        "athena:ListQueryExecutions"
+      ],
+      "Resource": "arn:aws:athena:us-east-1:546712138633:workgroup/crypto_wg"
+    },
+    {
+      "Sid": "AthenaListGlobalResources",
+      "Effect": "Allow",
+      "Action": [
+        "athena:ListWorkGroups",
+        "athena:ListDataCatalogs",
+        "athena:ListDatabases",
+        "athena:GetDataCatalog"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "GlueCatalogReadOnCryptoRaw",
+      "Effect": "Allow",
+      "Action": [
+        "glue:GetDatabase",
+        "glue:GetDatabases",
+        "glue:GetTable",
+        "glue:GetTables",
+        "glue:GetTableVersion",
+        "glue:GetTableVersions",
+        "glue:GetPartition",
+        "glue:GetPartitions",
+        "glue:BatchGetPartition"
+      ],
+      "Resource": [
+        "arn:aws:glue:us-east-1:546712138633:catalog",
+        "arn:aws:glue:us-east-1:546712138633:database/crypto_raw",
+        "arn:aws:glue:us-east-1:546712138633:table/crypto_raw/*"
+      ]
+    },
+    {
+      "Sid": "S3VerifyBucketForAthena",
+      "Effect": "Allow",
+      "Action": "s3:GetBucketLocation",
+      "Resource": "arn:aws:s3:::derekkuang-crypto-de-raw-546712138633-us-east-1-an"
+    }
+  ]
+}
