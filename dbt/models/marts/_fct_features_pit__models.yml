@@ -1,0 +1,29 @@
+version: 2
+
+models:
+  - name: fct_features_pit
+    description: >
+      Point-in-time-correct feature store for the BTC 15-min directional model
+      (the project's crown jewel). One row per (asset_id, event_at) carrying the
+      price/volume features from int_price_features, persisted as an incremental
+      Iceberg table (merge on the grain). Every row contains only information
+      knowable at event_at — no look-ahead. The forward-looking label is NOT
+      stored here; it is joined at train time. A custom singular test recomputes
+      a sample row's features from raw and asserts equality (PIT guarantee).
+    columns:
+      - name: asset_id
+        description: "Trading pair, e.g. BTC-USD."
+        tests:
+          - not_null
+      - name: event_at
+        description: "Bar open time, UTC, microsecond precision. With asset_id, the grain."
+        tests:
+          - not_null
+      - name: close_price
+        description: "Bar close price (USD)."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - asset_id
+              - event_at

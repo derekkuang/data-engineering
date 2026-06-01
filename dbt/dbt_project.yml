@@ -30,3 +30,9 @@ models:
       # while developing; it's still just SQL pushed down to Athena at query
       # time. Incremental/Iceberg is reserved for the marts.
       +materialized: view
+    marts:
+      # The curated, consumer-facing layer. Persisted (not a view) and
+      # incremental so each run processes only new bars. Lands in its own Glue
+      # database, crypto_marts. Per-model config sets the Iceberg/merge details.
+      +materialized: incremental
+      +schema: crypto_marts

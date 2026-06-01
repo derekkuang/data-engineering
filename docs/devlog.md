@@ -4,6 +4,30 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-06-01 — CROWN JEWEL: fct_features_pit (Iceberg incremental) + PIT test, 12/12 green
+
+**Did:**
+- Built `models/marts/fct_features_pit.sql` — the point-in-time feature store, materialized as an **incremental Iceberg** table (`incremental_strategy='merge'`, `unique_key=['asset_id','event_at']`, `table_type='iceberg'`, `partitioned_by=['asset_id']`), with the `is_incremental()` watermark filter `event_at > (select max(event_at) from {{ this }})`. v1 is a thin assembler over `int_price_features` (Kalshi feature joins in later). Lands in Glue db `crypto_marts`.
+- Added `macros/generate_schema_name.sql` — overrides dbt's default `<target>_<custom>` schema concat so `+schema: crypto_marts` lands in exactly `crypto_marts` (matches the IAM grant; default concat `crypto_staging_crypto_marts` would've been denied). `dbt_project.yml` marts block: `+materialized: incremental`, `+schema: crypto_marts`.
+- **Demonstrated incremental live:** run 1 = `OK 180236` (full build, is_incremental false); run 2 immediately after = `OK 0` (watermark found nothing newer → merged 0 rows); row count held at 180,236 → merge idempotency proven (no dupes, grain test green). Cost scales with NEW data, not total.
+- **Built the PIT singular test** `tests/assert_fct_features_pit_is_point_in_time.sql` — independently recomputes `rel_volume_20` for the 5 latest rows/asset using ONLY raw bars with `event_at <= T` (a backward-only join+rank), asserts equality with the stored feature. Returns 0 rows = pass.
+- **Proved the test has TEETH** (it can fail): a 3-column inline (`stored` vs `backward_recompute` vs `forward_lookahead`) showed stored==backward exactly (3.905=3.905, 0.452=0.452…) while a forward-looking recompute diverged hard (3.905 vs 2.242, 0.452 vs 1.000) — i.e., if any window had peeked ahead, the test would surface rows and go red. Not a trivial green.
+- Full suite: **`dbt test` = PASS 12/12** (staging/intermediate/mart grain+not-null + the PIT test).
+
+**Learned (smaller):**
+- dbt-athena writes a `view` with ZERO S3 data (Glue catalog object only) but an `incremental`/`iceberg` mart writes real Parquet+metadata to S3 — that's why the mart needed the Glue table/partition write IAM (already granted) and the views didn't.
+- A passing test is only worth the proof that it CAN fail — always sanity-check teeth (the forward-vs-backward demo) before trusting a green PIT test.
+
+**▶ PICK UP HERE NEXT TIME — Kalshi ingestion (Option B), now the next unit.** The price-only PIT store is done. Next: bring in the directional signal's other half.
+1. New Python module `ingestion/kalshi.py` — RSA-PSS signed client (sign `timestamp+METHOD+path`, path sans query; headers KALSHI-ACCESS-{KEY,SIGNATURE,TIMESTAMP}), **develop against demo env `demo-api.kalshi.co`** first. Pull 15-min BTC up/down market **candlesticks** (1-min) → implied-prob history.
+2. Land Parquet → `s3://.../raw/kalshi_btc_15min/dt=YYYY-MM-DD/`, mirror the storage.py contract pattern; Glue external table `crypto_raw.kalshi_btc_15min` (partition projection).
+3. Then a `stg_kalshi_*` view + join the implied-prob feature into `fct_features_pit`; define the forward 15-min up/down **label** (separate, NOT in the PIT store).
+4. See memory `reference_kalshi_api.md` for endpoints/auth and `project` memory for the trading/eval policy (edge-bet hold-to-expiry; metric = calibration + cost-aware PnL).
+
+**Context for a fresh chat:** read this entry + the 3 memory files. dbt on branch `phase1/athena-pivot-and-ingestion`; staging+intermediate committed (9f88bfc, 35f7721), mart+PIT test uncommitted as of writing this line.
+
+---
+
 ## 2026-06-01 — Directional pivot (BTC 15-min + Kalshi) decided; int_price_features built
 
 **Decided (the big one — a deliberate framing change):**
