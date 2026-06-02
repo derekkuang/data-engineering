@@ -13,13 +13,15 @@ Built the transformation layer that turns the raw Kalshi candles into a leakage-
 - `intermediate/int_kalshi_implied_prob` (view) — **per wall-clock minute, the active market's implied prob**. PIT-critical filter `window_open <= event_at < window_close` (strict `<` picks the just-opened market at a boundary, not the settling one). **`unique event_at` test passes → exactly one active market per minute.**
 - `marts/fct_features_pit` — added `kalshi_implied_prob/mid/spread`. Join correctness: Kalshi is BTC-only, so tag the CTE `asset_id='BTC-USD'` and join on `(asset_id, event_at)` — joining on `event_at` alone would wrongly give ETH rows BTC's prob. Value is the price AT T → PIT-safe. Full-refresh (schema change); **PIT test still PASS**. BTC: 86,626/100,076 minutes have prob (rest predate the 03-26 Kalshi launch), avg ≈ 0.505; ETH: 0 (NULL, expected).
 - `marts/fct_kalshi_15min_label` (view, overrides marts incremental default) — **forward up/down label**, 1 row per settled window, `label_up = result=='yes'`. FORWARD-LOOKING → deliberately NOT in `fct_features_pit`; join at train time on `window_open_at = event_at`. Class balance **3,118 up / 3,103 down** (~50/50 → 15-min direction is near coin-flip; beating the market after costs is the real bar).
+- `marts/fct_btc_15min_training` (view) — **the leakage-free trainable table**: one row per settled window = PIT features + `kalshi_implied_prob` (benchmark) + `label_up`, joined at `decision_at` = the first observable Kalshi minute (~W+1, since the window's market doesn't exist before W). **6,191 windows; sanity check: market avg implied prob 0.503 ≈ actual up-rate 0.502 → benchmark well-calibrated AND the join has no look-ahead (a leakage bug would break that); avg spread 0.012 (~1.2¢) = the cost hurdle.**
 
 **Learned:** dbt-athena `accepted_values` on an INTEGER column errors (macro quotes values as strings; Trino is strict int-vs-varchar) → use `quote: false`.
 
-**▶ PICK UP HERE NEXT TIME — the model:**
-1. A training/eval mart: sample `fct_features_pit` at window-open minutes (BTC, non-null kalshi) + join `fct_kalshi_15min_label` on `window_open_at = event_at` → leakage-free `features + benchmark (kalshi_implied_prob) + label_up`.
-2. **Walk-forward** model (no shuffled splits); honest metric = beat the market-implied prior, net of `kalshi_spread`/fees; calibration + cost-aware PnL. Write predictions back to a `fct_model_predictions` mart.
-3. (Optional) extend the PIT singular test to also recompute `kalshi_implied_prob` from raw at `<= T`.
+**▶ PICK UP HERE NEXT TIME — the ML model (new session):**
+1. ✅ DONE — `fct_btc_15min_training` is the leakage-free table (read it / UNLOAD to S3 Parquet for SageMaker).
+2. **Walk-forward** model in `ml/` (lightgbm or sklearn; NO shuffled splits — time-ordered folds). Honest metric = beat the market-implied prior (`kalshi_implied_prob`), **net of `kalshi_spread`/fees**; report calibration + cost-aware PnL. Write predictions to a `fct_model_predictions` mart; run inference from an Airflow task (batch — see SageMaker note below).
+3. Deployment (later, optional MLOps showcase): batch inference via Airflow is the project-fit default; a SageMaker **serverless** endpoint or **Pipelines** retrain-trigger is a strong resume add but NOT an always-on real-time endpoint (cost + overkill for a 15-min cadence).
+4. (Optional) extend the PIT singular test to also recompute `kalshi_implied_prob` from raw at `<= T`.
 
 **Context for a fresh chat:** branch `phase1/athena-pivot-and-ingestion`. New dbt models under `dbt/models/{staging,intermediate,marts}` (4 models + yml). `fct_features_pit` now carries the Kalshi feature; `fct_kalshi_15min_label` holds the label. Data: ~100k BTC feature-minutes + 6,221 settled labeled windows (~66 days, 2026-03-26 → now).
 

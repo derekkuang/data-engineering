@@ -1,0 +1,44 @@
+version: 2
+
+models:
+  - name: fct_btc_15min_training
+    description: >
+      Leakage-free trainable table: one row per settled KXBTC15M window, joining the
+      PIT-safe BTC features (incl. kalshi_implied_prob = the market benchmark) at the
+      decision minute to the forward label_up. event_at is the decision minute (~W+1);
+      window_open_at/window_close_at bound the settlement window. The ML model +
+      walk-forward backtest read this.
+    columns:
+      - name: market_ticker
+        description: "The 15-min market (one row per window)."
+        tests:
+          - not_null
+          - unique
+      - name: window_open_at
+        description: "Window start W (settlement reference start)."
+        tests:
+          - not_null
+      - name: window_close_at
+        description: "Window end W+15 (settlement reference end)."
+        tests:
+          - not_null
+      - name: event_at
+        description: "Decision minute (~W+1) — features are known as of here."
+        tests:
+          - not_null
+      - name: label_up
+        description: "TARGET: 1 if BTC settled up over the window, else 0."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+                quote: false
+      - name: kalshi_implied_prob
+        description: "Market-implied P(up) at the decision minute = the benchmark to beat."
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
