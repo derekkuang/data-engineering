@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: fct_kalshi_15min_label
+    description: >
+      Forward 15-minute directional label, one row per settled KXBTC15M window.
+      label_up = 1 if BTC settled up over the window, else 0. FORWARD-LOOKING — the
+      window's outcome — so it is NOT in fct_features_pit; join it to features at
+      train time on window_open_at = event_at.
+    columns:
+      - name: market_ticker
+        description: "The 15-min market (one row per window)."
+        tests:
+          - not_null
+          - unique
+      - name: window_open_at
+        description: "Window start = the decision minute; join key to fct_features_pit.event_at."
+        tests:
+          - not_null
+      - name: window_close_at
+        description: "Window end = settlement reference time."
+        tests:
+          - not_null
+      - name: result
+        description: "Settlement outcome."
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['yes', 'no']
+      - name: label_up
+        description: "1 if BTC up over the window, else 0."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+                quote: false   # integer column — compare unquoted (Athena/Trino is strict int vs varchar)

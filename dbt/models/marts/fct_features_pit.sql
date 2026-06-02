@@ -31,6 +31,31 @@ with features as (
     where event_at > (select max(event_at) from {{ this }})
     {% endif %}
 
+),
+
+-- Kalshi implied probability is BTC-only, so it is tagged asset_id='BTC-USD' and
+-- joined on (asset_id, event_at) — joining on event_at alone would wrongly attach
+-- BTC's probability to ETH rows. The value is the market price AT event_at, so it
+-- is point-in-time-safe (no look-ahead), same contract as the price features.
+-- ETH rows simply get NULL (there is no KXETH 15-min market here).
+kalshi as (
+
+    select
+        'BTC-USD'           as asset_id,
+        event_at,
+        kalshi_implied_prob,
+        kalshi_mid_price,
+        kalshi_spread
+    from {{ ref('int_kalshi_implied_prob') }}
+
 )
 
-select * from features
+select
+    f.*,
+    k.kalshi_implied_prob,
+    k.kalshi_mid_price,
+    k.kalshi_spread
+from features f
+left join kalshi k
+    on  f.asset_id = k.asset_id
+    and f.event_at = k.event_at

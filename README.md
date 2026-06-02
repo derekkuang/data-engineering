@@ -23,7 +23,8 @@ Build a production-grade ELT pipeline that ingests crypto market and on-chain da
 | GitHub Actions CI (OIDC → `dbt build`) | ✅ Built | Green on push — assumes IAM role via OIDC (no stored keys), runs `dbt build` + schema/PIT tests against Athena |
 | Airflow `crypto_price_ingest` DAG | ✅ Built | Astro Runtime 3 / Airflow 3, dynamic task mapping; runs locally |
 | Kalshi 15-min ingestion (public client + backfill + live DAG task) | ✅ Built | `KXBTC15M` implied-prob/spread/result → S3 Parquet; backfill + live Airflow task; Glue DDL in `docs/setup/05` (run with owner perms) |
-| Kalshi → mart join + directional label | ⬜ Planned | `stg_kalshi`, join implied-prob (PIT-safe) + forward 15-min up/down label |
+| Kalshi → mart join + directional label | ✅ Built | `stg_kalshi_btc_15min` → `int_kalshi_implied_prob` → `kalshi_implied_prob` joined PIT-safe into `fct_features_pit`; `fct_kalshi_15min_label` (forward up/down, out of PIT store) |
+| ML model + walk-forward backtest | ⬜ Planned | Kalshi-benchmarked, cost-aware (net of spread/fees) |
 | `crypto_features_refresh` DAG (run→test→inference) | ⬜ Planned | The second DAG; quality-gated inference |
 | ML model + walk-forward backtest | ⬜ Planned | Kalshi-benchmarked, cost-aware |
 | Streamlit dashboard | ⬜ Planned | Features + predictions + PnL |

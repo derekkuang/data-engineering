@@ -1,0 +1,45 @@
+version: 2
+
+models:
+  - name: stg_kalshi_btc_15min
+    description: >
+      Cleaned candle-level Kalshi KXBTC15M data: one row per (market_ticker,
+      event_at), with implied probability, bid/ask, derived mid + spread, and the
+      window's settlement result. A view over the raw external table.
+    columns:
+      - name: market_ticker
+        description: "The 15-min market, e.g. KXBTC15M-26JUN011745-45."
+        tests:
+          - not_null
+      - name: window_open_at
+        description: "Start of the 15-min window, UTC."
+        tests:
+          - not_null
+      - name: window_close_at
+        description: "End of the 15-min window, UTC."
+        tests:
+          - not_null
+      - name: event_at
+        description: "Candlestick (1-min bar) end timestamp, UTC."
+        tests:
+          - not_null
+      - name: implied_prob
+        description: "Market price at bar close (0..1) = implied P(up over window)."
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: mid_price
+        description: "(yes_bid + yes_ask) / 2."
+      - name: spread
+        description: "yes_ask - yes_bid = the trading cost (in dollars, 0..1)."
+      - name: result
+        description: "Settlement: 'yes' (up) / 'no' (down) / '' if unsettled. FORWARD-LOOKING — label only."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - market_ticker
+              - event_at

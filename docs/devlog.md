@@ -4,6 +4,27 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-06-02 — dbt Kalshi layer: implied-prob feature (PIT-safe) + forward label
+
+Built the transformation layer that turns the raw Kalshi candles into a leakage-free feature+label setup. Glue table `crypto_raw.kalshi_btc_15min` was created by owner in the Athena console (least-priv pipeline user can't `CreateTable` on `crypto_raw`); verify SELECT green.
+
+**Models (full `dbt build` = PASS 36/36):**
+- `staging/stg_kalshi_btc_15min` (view) — clean candles, 1 row per `(market_ticker, event_at)`; derive `mid_price` + `spread`; drop null-price rows. Tests: grain unique, not-nulls, `implied_prob` in 0..1.
+- `intermediate/int_kalshi_implied_prob` (view) — **per wall-clock minute, the active market's implied prob**. PIT-critical filter `window_open <= event_at < window_close` (strict `<` picks the just-opened market at a boundary, not the settling one). **`unique event_at` test passes → exactly one active market per minute.**
+- `marts/fct_features_pit` — added `kalshi_implied_prob/mid/spread`. Join correctness: Kalshi is BTC-only, so tag the CTE `asset_id='BTC-USD'` and join on `(asset_id, event_at)` — joining on `event_at` alone would wrongly give ETH rows BTC's prob. Value is the price AT T → PIT-safe. Full-refresh (schema change); **PIT test still PASS**. BTC: 86,626/100,076 minutes have prob (rest predate the 03-26 Kalshi launch), avg ≈ 0.505; ETH: 0 (NULL, expected).
+- `marts/fct_kalshi_15min_label` (view, overrides marts incremental default) — **forward up/down label**, 1 row per settled window, `label_up = result=='yes'`. FORWARD-LOOKING → deliberately NOT in `fct_features_pit`; join at train time on `window_open_at = event_at`. Class balance **3,118 up / 3,103 down** (~50/50 → 15-min direction is near coin-flip; beating the market after costs is the real bar).
+
+**Learned:** dbt-athena `accepted_values` on an INTEGER column errors (macro quotes values as strings; Trino is strict int-vs-varchar) → use `quote: false`.
+
+**▶ PICK UP HERE NEXT TIME — the model:**
+1. A training/eval mart: sample `fct_features_pit` at window-open minutes (BTC, non-null kalshi) + join `fct_kalshi_15min_label` on `window_open_at = event_at` → leakage-free `features + benchmark (kalshi_implied_prob) + label_up`.
+2. **Walk-forward** model (no shuffled splits); honest metric = beat the market-implied prior, net of `kalshi_spread`/fees; calibration + cost-aware PnL. Write predictions back to a `fct_model_predictions` mart.
+3. (Optional) extend the PIT singular test to also recompute `kalshi_implied_prob` from raw at `<= T`.
+
+**Context for a fresh chat:** branch `phase1/athena-pivot-and-ingestion`. New dbt models under `dbt/models/{staging,intermediate,marts}` (4 models + yml). `fct_features_pit` now carries the Kalshi feature; `fct_kalshi_15min_label` holds the label. Data: ~100k BTC feature-minutes + 6,221 settled labeled windows (~66 days, 2026-03-26 → now).
+
+---
+
 ## 2026-06-01 — Kalshi 15-min BTC ingestion: public data, backfill + live DAG (both green)
 
 **Big pivot (made the unit far simpler):** verified via docs that **Kalshi market-data endpoints — markets + candlesticks — are PUBLIC and unauthenticated** on prod (`https://external-api.kalshi.com/trade-api/v2`). We only need read-only price/implied-prob and never place orders, so **no API key / demo env / KYC is needed**. Also confirmed the demo env lacks real activity, so we use **prod market data, read-only** ("monitor price/action, no trades"). The RSA-PSS signer is still built in `ingestion/kalshi.py` but optional (public mode by default).
