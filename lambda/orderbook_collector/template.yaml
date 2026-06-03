@@ -1,0 +1,92 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  KXBTC15M order-book collector — serverless graduation of the local launchd job.
+  EventBridge fires the Lambda at the decision minutes under study (W+1 control,
+  W+12 candidate cluster, W+14 near-expiry) of every 15-min window; the function
+  snapshots the live executable book + BTC spot and writes JSONL to S3. Read-only
+  public Kalshi market data — no auth, no orders.
+
+Parameters:
+  DataBucket:
+    Type: String
+    Description: S3 bucket for both the code artifact and the snapshot output.
+  CodeS3Key:
+    Type: String
+    Description: S3 key of the deployment zip (uploaded by scripts/deploy_orderbook_lambda.sh).
+  KalshiApiBase:
+    Type: String
+    Default: https://external-api.kalshi.com/trade-api/v2
+    Description: Public Kalshi market-data base URL.
+
+Resources:
+  CollectorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: kxbtc-orderbook-collector-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: write-snapshots-and-logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Least privilege: only PUT under the snapshots prefix, only own log group.
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "arn:aws:s3:::${DataBucket}/raw/orderbook_snapshots/*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/kxbtc-orderbook-collector:*"
+
+  CollectorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: kxbtc-orderbook-collector
+      Runtime: python3.12
+      Architectures: [arm64]
+      Handler: handler.handler
+      Role: !GetAtt CollectorRole.Arn
+      Timeout: 90        # 3 snapshots * 20s + margin
+      MemorySize: 128
+      Code:
+        S3Bucket: !Ref DataBucket
+        S3Key: !Ref CodeS3Key
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref DataBucket
+          KALSHI_API_BASE: !Ref KalshiApiBase
+          SNAPSHOTS: "3"
+          INTERVAL: "20"
+
+  # W+1 (control), W+12 (candidate), W+14 (near-expiry) for each of the four
+  # 15-min windows per hour -> minutes 1,12,14 / 16,27,29 / 31,42,44 / 46,57,59.
+  Schedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: kxbtc-orderbook-decision-minutes
+      ScheduleExpression: "cron(1,12,14,16,27,29,31,42,44,46,57,59 * * * ? *)"
+      State: ENABLED
+      Targets:
+        - Id: collector
+          Arn: !GetAtt CollectorFunction.Arn
+
+  AllowEventBridge:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CollectorFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt Schedule.Arn
+
+Outputs:
+  FunctionName:
+    Value: !Ref CollectorFunction
+  SnapshotPrefix:
+    Value: !Sub "s3://${DataBucket}/raw/orderbook_snapshots/"
