@@ -4,6 +4,33 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-06-03 (cont.) — the +8% VERDICT: live-execution reconciliation + favorite-longshot null (alpha hunt CLOSED)
+
+Picked up the overnight order-book collector and settled the last open question in the whole project: **is the +8% backtest tradeable, or a lead-lag artifact?**
+
+**Did — live-execution reconciliation (`ml/live_exec_reconcile.py`, ruff+mypy clean):**
+- Collector banked **40 decision-minute windows** overnight (`data/orderbook_snapshots.jsonl`, 3 snaps/20s each); 37 reconciled. Confirmed the launchd alignment: the backtest prices at the first in-window candle's CLOSE (`event_at = end_period_ts = W+1:00`), and the :01 fire snaps at ~W+1:00 — so live-vs-backfill is a fair, same-instant comparison.
+- **Method (model-free, chosen over a full model re-score):** the live data only changes ONE backtest input — the execution price (model prob + settlement are unchanged) — so I isolated it. Per window: live executable ask (snap nearest W+1:00) vs the backfill candle ask the backtest used; reused `ml.backtest._summarise / _effective_quote / _breakeven_cost` to map the measured slippage onto the real 6,132-window backtest.
+- **Finding 1 — NOT a stale-quote artifact.** Decision-instant slippage is UNBIASED: pooled ask mean +0.03c, median 0c (std ~4c). The price the backtest assumed was real and hittable. (This is what the earlier 5-way leak-hunt couldn't prove; now proven against live data.)
+- **Finding 2 — the edge is friction-bound and latency-sensitive.** The book reprices ~3.8c per 20s. Spot-tracking regression (the tightener, to refute "zero-mean drift is free"): within-burst **mid move tracks BTC spot at R²=0.92, r=+0.96, +24c/$100, 94% sign agreement** → the drift is structural and ADVERSE to a momentum bettor (you and the market react to the same move; betting with it, your side's cost rises before you can fill).
+- **Mapping to the +8%:** at recorded price +8.03% (reproduces the backtest exactly — sanity check); charging the zero-mean instant scatter (~2.9c, a *pessimistic* bound) → +3.9%; charging one 20s latency drift (~3.8c, *legitimate* since adverse) → +2.9%; breakeven ~6.2c is only ~2 such delays away.
+- **VERDICT: a real but THIN, latency-bound microstructure edge — exactly the size of the execution friction protecting it — uncapturable by a 15-min batch pipeline. Textbook efficient market.** Committed `655ccda`.
+
+**Did — favorite-longshot / tail-mispricing test (`ml/favorite_longshot.py`, clean):** a structural edge that needs NO forecast and NO fast execution — does the market overprice longshots / underprice favorites (the near-universal betting-market bias)? Reused `ml.metrics.reliability_table` + `_summarise`. RESULT: **NULL.** Calibration clean across all bins (every |z| < 1; the bias is absent even in the tails); betting the favorite loses −3.4..−3.9% at every depth cutoff; betting the longshot loses −5..−8%. The lone +31% deep-longshot bin is 18 bets / +$0.48 of noise pointing the *wrong* way. Market prices the tails fairly too.
+
+**Learned / framing:**
+- The model-free reconciliation is cleaner than a full live re-score: when an experiment changes exactly one variable, isolate it instead of rebuilding everything (the live windows aren't in the marts anyway, so re-scoring would mean re-ingesting + risking dbt-feature leakage in pandas).
+- Distinguish a *pessimistic* cost charge from a *legitimate* one: zero-mean fill scatter doesn't bias expected PnL, but spot-tracking drift does — so the spot-tracking R² is what licenses the latency haircut. Charging "abs drift" without that proof would be hand-waving.
+- The honest close is a STRONGER portfolio story than a fake +8%: "found an apparent edge → stress-tested 5 ways → built a live experiment → showed it's a latency-bound artifact, the size of its own friction." Demonstrates I can tell microstructure from alpha and will kill my own result.
+- **Alpha hunt fully exhausted across every axis:** model class, slow derivatives, fast microstructure, execution timing, AND price-shape (favorite-longshot) — all null. 15-min BTC direction is efficiently priced w.r.t. reasonable public info. The deliverable is the PLATFORM + the rigor of the no-edge proof.
+
+**▶ NEXT:**
+1. **Stop the pilot infra** (no longer collecting for a purpose): `launchctl bootout gui/501 ~/Library/LaunchAgents/com.derekkuang.{kxbtc-orderbook,stay-awake}.plist`. Keep the JSONL + the reconciliation as the artifact.
+2. **Write-up: dashboard + README** telling the honest arc — benchmark (market is the bar) → leak-caught baseline → +8% saga → 5-way leak-hunt → live-execution verdict → favorite-longshot null. This is the portfolio centerpiece.
+3. Optional remaining backlog angles (low priority, all likely null): Deribit options-implied prob, BRTI settlement lag (~10s structural, near-expiry), cross-market/term-structure — see memory `project-alpha-strategy-backlog`.
+
+---
+
 ## 2026-06-03 — Phase 1 ML: model, the +8% backtest saga, alpha hunt (all axes null), live execution test
 
 **Did — ML layer end-to-end (`ml/`, all strict-mypy + ruff clean):**
