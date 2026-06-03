@@ -203,6 +203,25 @@ class KalshiClient:
                 out[entry["market_ticker"]] = entry.get("candlesticks", [])
         return out
 
+    def get_market_orderbook(self, ticker: str, depth: int | None = None) -> dict[str, Any]:
+        """Live resting order book for a market. Read-only market data (works in
+        public mode). ``depth`` caps the number of price levels per side. Unlike
+        candlesticks, this is a live-only snapshot — there is no historical
+        order-book endpoint.
+
+        Kalshi returns ``orderbook_fp`` with ``yes_dollars`` / ``no_dollars`` arrays
+        of [price_dollars, quantity] (strings). A 'no' bid at price p is the same as
+        a 'yes' ask at (1 - p), so best_yes_ask = 1 - best_no_bid."""
+        params = {"depth": depth} if depth is not None else None
+        resp = self.get(f"/markets/{ticker}/orderbook", params=params)
+        # Explicit None checks (not `or`) so a present-but-EMPTY book ({}) — a market
+        # with no resting orders — isn't masked by falling through to the other key.
+        book = resp.get("orderbook_fp")
+        if book is None:
+            book = resp.get("orderbook")
+        result: dict[str, Any] = book if book is not None else {}
+        return result
+
     def close(self) -> None:
         self._http.close()
 
