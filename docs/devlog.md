@@ -4,6 +4,44 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-06-03 — Phase 1 ML: model, the +8% backtest saga, alpha hunt (all axes null), live execution test
+
+**Did — ML layer end-to-end (`ml/`, all strict-mypy + ruff clean):**
+- `ml/data.py` (Athena→pandas loader), `ml/metrics.py` (log loss / Brier / ECE + reliability), `ml/walkforward.py` (expanding-window splits — never shuffle), `ml/model.py` (reusable walk-forward OOF + logistic & LightGBM).
+- Benchmark first: Kalshi `implied_prob` near-perfectly calibrated (ECE 0.5%), **log loss 0.659 = the bar**.
+- Honest baseline: caught + fixed a feature leak (`kalshi_mid_price` ≈ benchmark leaking into "BTC-only" features → `MARKET_COLS` exclusion). Clean walk-forward logistic ≈ **TIES** the market (LL 0.655 vs 0.662).
+
+**Did — the +8% backtest saga (`ml/backtest.py`):**
+- Cost-aware walk-forward PnL (real spread mid±spread/2 + Kalshi fee). Surprise: **NET PROFITABLE +8% ROI**, robust to 3× spread / +2c slippage (breakeven ~5.8c).
+- No-skill CONTROLS (anti-model −15.6%, random/fade/follow all lose) → signal, not a PnL bug. 5-way leak-hunt cleared cost-bug / head-start / decision-alignment / bad-price.
+- LIVE order book (`ingestion/kalshi.py::get_market_orderbook`) REFUTED "illiquid quote": real 1c spread, ~30k resting/side, executable.
+- **Unresolved gap:** backtest priced at the candlestick CLOSE, but the live decision-minute price moves several cents in *seconds* (lead-lag) → the +8% may be untradeable. Built a live collector to settle it.
+
+**Did — alpha hunt, all three axes NULL:**
+- Model class (LightGBM): no help, overfit (LL 0.659, ECE 0.031).
+- Slow derivatives (Deribit funding, `ingestion/deribit.py` + `ml/derivatives.py`; US-accessible — Binance/Bybit geo-block 451/403): no signal (0.655→0.656).
+- Fast microstructure (Binance Vision aggTrades, `ingestion/binance_flow.py` + `ml/orderflow.py`; **53.3M trades → 96,480 minute rows** of taker OFI): no signal (0.655→0.656). **DEFINITIVE: 15-min direction efficiently priced w.r.t. reasonable public info.**
+
+**Did — live execution test infra (LEFT RUNNING):**
+- `ingestion/kalshi_orderbook.py` + `scripts/collect_orderbook.sh` → launchd `com.derekkuang.kxbtc-orderbook` fires :01/:16/:31/:46, snapshots decision-minute book + BTC spot → `data/orderbook_snapshots.jsonl`. Mac kept awake via launchd `com.derekkuang.stay-awake` (`caffeinate -i -s`).
+
+**Did — strategy research (web):** logged 5 untested alpha angles to memory `project-alpha-strategy-backlog` (favorite-longshot, Deribit options-implied, BRTI settlement lag ~10s, cross-market/term-structure, market-making).
+
+**Learned:**
+- Tiny log-loss edge ↔ large betting edge: with price noise ε, LL gap ~ε² but betting edge ~|ε| (0.007 LL → ~5c edge is consistent, not a bug).
+- Controls catch cost/accounting bugs but NOT look-ahead; only a live-execution test settles "is the backtest price tradeable?".
+- Model class isn't the lever when features are already priced — alpha needs NEW info or to STOP forecasting (import/structural/settlement edges).
+- Kalshi BTC settles on CF Benchmarks BRTI (laggy TWAP ~10s) — structural near-expiry angle. Whole serverless platform ≈ $1/mo; Lambda collector ≈ free vs ~$4-8/mo for idle EC2.
+
+**▶ NEXT (fresh session — pick up here):**
+1. **Check overnight data:** `wc -l data/orderbook_snapshots.jsonl` (collector + stay-awake left running).
+2. **THE +8% VERDICT — live-execution reconciliation:** per captured window, join live touch price + reconstructed model signal + settlement outcome → PnL at REAL live prices vs the +8% backtest (expect it to collapse, confirming the lead-lag artifact). Reuses `ml/backtest.py::_summarise`.
+3. **Cheapest new alpha shot:** favorite-longshot / tail-mispricing + within-Kalshi term-structure consistency on existing data (see memory `project-alpha-strategy-backlog`).
+4. Then: Deribit options-implied prob; optionally graduate collector to AWS Lambda; **commit the session's `ml/` + ingestion work (currently uncommitted)**.
+5. Cleanup when done: `launchctl bootout gui/501 ~/Library/LaunchAgents/com.derekkuang.{kxbtc-orderbook,stay-awake}.plist`.
+
+---
+
 ## 2026-06-02 — dbt Kalshi layer: implied-prob feature (PIT-safe) + forward label
 
 Built the transformation layer that turns the raw Kalshi candles into a leakage-free feature+label setup. Glue table `crypto_raw.kalshi_btc_15min` was created by owner in the Athena console (least-priv pipeline user can't `CreateTable` on `crypto_raw`); verify SELECT green.
