@@ -4,6 +4,34 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-06-04 — Lambda collector LIVE; "can we make money even with latency solved?"; threshold-market RV scan (null)
+
+Continuation of the +8% saga: graduated collection to AWS, reasoned out the real capturability wall, and started testing the remaining *no-race* edges.
+
+**Did — Lambda order-book collector deployed + fixed (`lambda/orderbook_collector/`, CloudFormation):**
+- Deployed via `AWS_PROFILE=admin scripts/deploy_orderbook_lambda.sh` (deploy needs admin; the local `crypto-de-pipeline` user is S3-only). Verified: manual invoke → 200 + wrote a snapshot to `s3://…/raw/orderbook_snapshots/`. EventBridge fires it 24/7 at W+1/W+12/W+14 of every window. Cost ~free (Lambda always-free tier; EventBridge scheduled rules free; S3 cents).
+- **Bug found+fixed (commit c7072df, redeploy pending):** every deployed snapshot had `btc_spot=None` — Coinbase (Cloudflare) 403s the default Python-urllib User-Agent. Added a browser UA; verified spot populates locally. Handler stays dependency-free (stdlib + boto3) so the zip is just handler.py.
+- Retired the local launchd collector + caffeinate (no more Mac dependency / sleep gaps). Capture offsets land at wk~2/10/13/15 (EventBridge jitter + the 40s burst), not exactly 1/12/14 — but each snapshot records its true wk and wk10/13 bracket W+12, so usable.
+- Cost check: month-to-date AWS = **$1.34**, ~all of it 266k S3 PUT/LIST requests from heavy *Athena query iteration* this session — NOT the Lambda, NOT storage. One-time dev cost; mitigable with Athena result-reuse + caching `load_training_frame` locally (it hits Athena every run).
+
+**Did — capturability reasoning (the honest "even if latency weren't an issue?"):**
+- We measured the decision→order loop only as a market-data GET *proxy* (~73ms warm, ~50–200× inside the ~30s breakeven) — **never an actual fill.** The real unknown isn't latency-in-ms, it's **fill QUALITY**: at execution do you get the *stale* (pre-reprice) price or the *repriced* one? Only answerable by actually placing orders (Kalshi demo → tiny real; the RSA-PSS signer exists, unused).
+- Structural verdict: even with latency "solved" for us, the lead-lag is an adversarial **race against co-located MMs** — the book reprices in seconds *because they're already racing*. We'd be the picked-off slow player. So **no realistic money in 15-min BTC direction; the wall is competition, not our wiring.** Logged the 3 remaining *no-race / untested* angles: threshold-market RV, less-liquid ETH/SOL 15-min, market-making.
+
+**Did — threshold-market static-arb scan (`ml/threshold_arb.py`) — NULL (clean no-race test).** KXBTCD/KXETHD ("X ≥ strike at expiry?") have strike ladders where P(≥K) must be non-increasing in K. Snapshotted the live ladders and checked (1) mid-monotonicity and (2) the EXECUTABLE arb — buy YES@K1 + NO@K2 (K1<K2) pays ≥$1 in *every* outcome, so cost <$1 net of fees = free money. Result: small mid-violations (worst +9.5c BTC 59.2k→59.3k, +3c ETH) but **0 executable arbs net of fees on any ladder, including the thinner ETH** → the mid inversions sit inside the spread+fee. Ladders internally consistent within costs = efficient. Caveat: single snapshot; transient arbs during fast moves / repeated sampling untested.
+
+**Learned:**
+- "Latency solved" (absolute ms) ≠ "winning the race" (being faster than the MMs who *set* the reprice speed). The binding constraint on the lead-lag is competition, not infra.
+- **Fill quality > fill latency:** even instant fills don't profit if the favorable resting quote is already gone — only live order placement measures it.
+- For a 2-leg static arb the **mid is misleading**; only executable touch prices (asks) net of fees decide, and mid "violations" routinely sit inside the spread.
+
+**▶ NEXT:**
+1. Redeploy the Lambda (push the spot fix), let it accrue ~2–3 days (~100 windows/day) → run the W+12 reconciliation to settle the cluster.
+2. Remaining no-race frontier: ingest ETH/SOL 15-min (KXETH15M/KXSOL15M) for the less-liquid direction/lead-lag test; (optional) re-run the threshold scan during a fast move; market-making is hard (adverse selection).
+3. (If ever settling capturability for real) Kalshi demo account → place paper/tiny-real orders → compare fill price to decision price.
+
+---
+
 ## 2026-06-03 (cont.) — the +8% VERDICT: live-execution reconciliation + favorite-longshot null (alpha hunt CLOSED)
 
 Picked up the overnight order-book collector and settled the last open question in the whole project: **is the +8% backtest tradeable, or a lead-lag artifact?**
