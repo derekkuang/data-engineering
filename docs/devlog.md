@@ -4,6 +4,22 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-06-05 (cont.) — Deribit options-implied + market-making: both null (the last two threads close)
+
+Ran the final two backlog angles — the only ones bringing *new* information (options) or a *different role* (providing vs taking liquidity).
+
+**Did — Deribit options-implied direction (`ml/options_implied.py`).** Live BTC option chain → shortest-expiry ATM IV 87.7% (1σ 15-min move 0.47% ≈ $300), risk-reversal −19 vol pts (heavy put skew). Risk-neutral **P(BTC up over 15 min) = 0.4991** → a **−0.09c** directional edge vs the ~1c spread. **Null by construction, not just empirically:** over 15 min the risk-neutral drift is negligible (N(d2)→0.5) and even a big skew moves it a sub-cent fraction. Options price *volatility*, not 15-min *direction* — so "import the smart-money options view" adds no usable directional signal. (It would matter for a vol/range/straddle market, which KXBTC15M isn't.)
+
+**Did — market-making feasibility (`ml/market_making.py`).** From 138 decision-minute order books: median spread 1.0c (half-spread 0.5c earned), mid-drift 0.17c/s (adverse selection from the lead-lag), Kalshi fee ~2.0c at mid. **Breakeven repricing latency τ* = 3s** (no fees) — a passive MM must re-quote within ~3s or the drift eats the half-spread → the SAME latency race as the taker side. And the **2c fee alone exceeds the 0.5c half-spread**, so unless Kalshi rebates makers, MM loses on fees *before* adverse selection enters. Providing liquidity is no free lunch — same wall, other side of the book.
+
+**This closes the alpha hunt completely.** Every reasonable angle is now tested and null: model class, derivatives (funding), order flow, the +8% lead-lag (latency artifact), favorite-longshot, settlement-lag (minute), threshold-ladder RV, less-liquid ETH/HYPE (friction-inefficiency), options-implied, and market-making. The only untested threads (W+12 live cluster, ETH forecasting) need unblocking and carry a strong null prior. The market is efficient to the limits of arbitrage; the deliverable is the platform + the rigor.
+
+**Learned:** options inform vol not short-horizon direction (a structural, not empirical, null — worth knowing for instrument selection); market-making is the *mirror* of the taker race plus a fee hurdle, so "be the MM" doesn't escape the wall.
+
+**▶ NEXT:** the write-up (README + dashboard of the whole honest arc) is now unambiguously the move — the hunt has reached a complete, conclusive end.
+
+---
+
 ## 2026-06-05 — ETH/HYPE efficiency test: thinner markets ARE less efficient, but untradeable (the friction–inefficiency tradeoff)
 
 Tested the "less-liquid → exploitable" hypothesis directly on the #2/#3 Kalshi 15-min markets (ETH, HYPE — confirmed by 24h volume: BTC 33k, ETH 1.3k, HYPE 0.3k). `ml/altcoin_efficiency.py` fetches each settled window's decision-minute implied prob + outcome straight from the public API (reusing `kalshi_backfill._fetch_candles`; no warehouse, no OHLCV needed) and runs calibration + favorite-longshot, with BTC fetched alongside as the calibrated reference.
