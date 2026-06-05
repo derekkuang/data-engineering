@@ -40,6 +40,9 @@ DEPTH = 50
 SNAPSHOTS = int(os.environ.get("SNAPSHOTS", "3"))
 INTERVAL = float(os.environ.get("INTERVAL", "20"))
 HTTP_TIMEOUT = 10.0
+# Coinbase (Cloudflare) 403s the default Python-urllib UA, so spot came back None.
+# A browser-style UA passes; identify the bot too.
+USER_AGENT = "Mozilla/5.0 (compatible; kxbtc-orderbook-collector/1.0)"
 
 
 def _get_json(url: str, params: dict[str, str | int] | None = None, retries: int = 3) -> Any:
@@ -49,7 +52,9 @@ def _get_json(url: str, params: dict[str, str | int] | None = None, retries: int
     last: Exception | None = None
     for attempt in range(retries):
         try:
-            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            req = urllib.request.Request(
+                url, headers={"Accept": "application/json", "User-Agent": USER_AGENT}
+            )
             with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:  # noqa: S310
                 return json.loads(resp.read().decode())
         except urllib.error.HTTPError as exc:
