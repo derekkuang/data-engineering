@@ -4,6 +4,27 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-06-05 — ETH/HYPE efficiency test: thinner markets ARE less efficient, but untradeable (the friction–inefficiency tradeoff)
+
+Tested the "less-liquid → exploitable" hypothesis directly on the #2/#3 Kalshi 15-min markets (ETH, HYPE — confirmed by 24h volume: BTC 33k, ETH 1.3k, HYPE 0.3k). `ml/altcoin_efficiency.py` fetches each settled window's decision-minute implied prob + outcome straight from the public API (reusing `kalshi_backfill._fetch_candles`; no warehouse, no OHLCV needed) and runs calibration + favorite-longshot, with BTC fetched alongside as the calibrated reference.
+
+**Result (45d, ~4,200 windows each):**
+- **BTC** (1c spread): log loss 0.658, ECE 0.018 — the informative, calibrated bar; favorite-longshot null (−2..−4.6%). Reproduces the warehouse numbers → method validated.
+- **ETH** (2c spread): log loss 0.658, ECE 0.015 — **just as efficient as BTC**; favorite null (−0.1..−4.1%). The 2× spread only makes it costlier. Hypothesis FAILS for ETH.
+- **HYPE** (9c spread): log loss **0.693 (= coin-flip, NO information)**, ECE 0.069 (4× worse), deep-favourite bin [0.9,1.0) realized 0.70 vs priced 0.92 — **measurably LESS efficient.** Hypothesis CONFIRMED directionally. BUT betting the favourite loses **−13..−14.5%** at every depth — the 9c spread obliterates the mispricing.
+- The deepest-favourite (≥0.90) +ROI in all three is n<15 noise (100% win on 8–12 bets) — same small-sample artifact as the BTC favorite-longshot bin.
+
+**The insight (arguably the best of the whole alpha hunt):** the efficiency↔liquidity relationship is REAL — BTC (most liquid) is most efficient, HYPE (107× thinner) is genuinely inefficient. But **friction scales WITH the inefficiency**: the uncontested market is mispriced *because* no one arbs it, and that same lack of competition is *why* the spread is 9c. So the inefficiency is always trapped inside the friction → untradeable. Markets are efficient "to the limits of arbitrage," shown directly across three assets. No money — but a clean, satisfying answer to "what about less-liquid markets?".
+
+**Learned:**
+- Caught my own bug live: favorite-DEPTH cutoffs must be on max(p,1−p) (≥0.5..0.9), not the bet-rule margin (0/0.05/0.10) — else they never filter (fav_prob is always ≥0.5).
+- "Less liquid → exploitable" is half-right: less liquid → less efficient (true for HYPE) but proportionally wider spread (so you still can't capture it).
+- Market-internal tests (calibration / favorite-longshot) need ONLY Kalshi price + outcome → portable to any asset with zero ingestion. That's why this was one script, not a pipeline.
+
+**▶ NEXT:** an ETH forecasting/lead-lag test would need ETH-USD OHLCV features — check whether `fct_features_pit` already carries ETH rows (the Coinbase ingest may have done BTC+ETH); if so it's a cheap in-memory test, else defer (prior = another null, ETH priced as well as BTC). Remaining: market-making (hard); the W+12 Lambda cluster verdict (pending redeploy + data accrual).
+
+---
+
 ## 2026-06-04 — Lambda collector LIVE; "can we make money even with latency solved?"; threshold-market RV scan (null)
 
 Continuation of the +8% saga: graduated collection to AWS, reasoned out the real capturability wall, and started testing the remaining *no-race* edges.
