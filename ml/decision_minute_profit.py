@@ -26,7 +26,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
-from ml.backtest import _fee
+from ml.backtest import _per_window_pnl
 from ml.data import _athena_connection
 from ml.settlement_lag import _disp_model_oof, _load_at_k
 
@@ -44,16 +44,9 @@ def _strategy_pnl(
     """Per-window PnL and stake for the threshold-0 bet rule (bet a side when the
     model clears that side's ask), net of the Kalshi fee. Returns parallel arrays so
     they can be aggregated by day for the bootstrap."""
-    no_ask = 1.0 - yes_bid
-    bet_yes = (prob - yes_ask) > 0.0
-    bet_no = (yes_bid - prob) > 0.0
-    yes_pnl = np.where(y == 1, 1.0, 0.0) - yes_ask - _fee(yes_ask)
-    no_pnl = np.where(y == 0, 1.0, 0.0) - no_ask - _fee(no_ask)
-    yes_cost = yes_ask + _fee(yes_ask)
-    no_cost = no_ask + _fee(no_ask)
-    pnl = np.where(bet_yes, yes_pnl, np.where(bet_no, no_pnl, 0.0))
-    stake = np.where(bet_yes, yes_cost, np.where(bet_no, no_cost, 0.0))
-    return pnl, stake
+    return _per_window_pnl(
+        (prob - yes_ask) > 0.0, (yes_bid - prob) > 0.0, y, yes_ask, 1.0 - yes_bid
+    )
 
 
 def _roi(pnl: FloatArr, stake: FloatArr) -> float:

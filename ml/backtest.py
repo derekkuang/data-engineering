@@ -48,6 +48,26 @@ def _fee(price: FloatArr) -> FloatArr:
     return np.ceil(FEE_RATE * price * (1.0 - price) * 100.0) / 100.0
 
 
+def _per_window_pnl(
+    bet_yes: npt.NDArray[np.bool_],
+    bet_no: npt.NDArray[np.bool_],
+    outcome: IntArr,
+    yes_ask: FloatArr,
+    no_ask: FloatArr,
+) -> tuple[FloatArr, FloatArr]:
+    """Per-window (pnl, stake) for a flat one-contract bet at the given asks, net of
+    the Kalshi fee. The single shared money-math primitive: `_summarise` aggregates
+    it, and the bootstrap scripts (decision_minute_profit, live_cluster_verdict)
+    consume the raw arrays so day-resampling stays possible."""
+    yes_pnl = np.where(outcome == 1, 1.0, 0.0) - yes_ask - _fee(yes_ask)
+    no_pnl = np.where(outcome == 0, 1.0, 0.0) - no_ask - _fee(no_ask)
+    pnl = np.where(bet_yes, yes_pnl, np.where(bet_no, no_pnl, 0.0))
+    staked = np.where(
+        bet_yes, yes_ask + _fee(yes_ask), np.where(bet_no, no_ask + _fee(no_ask), 0.0)
+    )
+    return pnl, staked
+
+
 def _summarise(
     bet_yes: npt.NDArray[np.bool_],
     bet_no: npt.NDArray[np.bool_],
@@ -56,13 +76,7 @@ def _summarise(
     no_ask: FloatArr,
 ) -> dict[str, float]:
     """Flat one-contract stake per qualifying window; tally PnL net of fees."""
-    yes_pnl = np.where(outcome == 1, 1.0, 0.0) - yes_ask - _fee(yes_ask)
-    no_pnl = np.where(outcome == 0, 1.0, 0.0) - no_ask - _fee(no_ask)
-
-    yes_cost = yes_ask + _fee(yes_ask)
-    no_cost = no_ask + _fee(no_ask)
-    pnl = np.where(bet_yes, yes_pnl, np.where(bet_no, no_pnl, 0.0))
-    staked = np.where(bet_yes, yes_cost, np.where(bet_no, no_cost, 0.0))
+    pnl, staked = _per_window_pnl(bet_yes, bet_no, outcome, yes_ask, no_ask)
     made_bet = bet_yes | bet_no
     wins = (bet_yes & (outcome == 1)) | (bet_no & (outcome == 0))
 

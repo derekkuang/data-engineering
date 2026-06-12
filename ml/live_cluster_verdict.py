@@ -59,7 +59,7 @@ from dotenv import load_dotenv
 
 from ingestion.coinbase import fetch_bars
 from ingestion.kalshi import SERIES_BTC_15M, KalshiClient
-from ml.backtest import _fee
+from ml.backtest import _per_window_pnl
 from ml.data import _athena_connection
 from ml.decision_minute_profit import N_BOOT, RNG, _day_sums, _roi, _strategy_pnl
 from ml.model import logistic_pipeline
@@ -214,12 +214,7 @@ def _pnl_with_fills(
 ) -> tuple[FloatArr, FloatArr]:
     """PnL/stake for a FIXED bet set filled at the given quote (fee included) —
     the 'same bets, repriced' leg that _strategy_pnl (which re-decides) can't do."""
-    no_ask = 1.0 - yes_bid
-    yes_pnl = np.where(y == 1, 1.0, 0.0) - yes_ask - _fee(yes_ask)
-    no_pnl = np.where(y == 0, 1.0, 0.0) - no_ask - _fee(no_ask)
-    pnl = np.where(bet_yes, yes_pnl, np.where(bet_no, no_pnl, 0.0))
-    stake = np.where(bet_yes, yes_ask + _fee(yes_ask), np.where(bet_no, no_ask + _fee(no_ask), 0.0))
-    return pnl, stake
+    return _per_window_pnl(bet_yes, bet_no, y, yes_ask, 1.0 - yes_bid)
 
 
 # --- assembly ----------------------------------------------------------------
