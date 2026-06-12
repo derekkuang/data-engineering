@@ -4,6 +4,34 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-06-11 — the W+9–13 cluster VERDICT from the Lambda books: not an execution artifact — *no edge at all* out-of-period (cluster CLOSED)
+
+The Lambda collector ran flawlessly while Derek was away (06-05→06-12 UTC: 288 files/day = 96 windows × 3 bursts at true offsets ~W+1:50 / ~W+12:51 / ~W+14:50; `btc_spot` populated from 06-05 06:14 — the UA fix was redeployed). That gave **~650 settled windows over 8 fresh days with a LIVE executable book + simultaneous spot at the cluster minute** — vs the ~40 W+1-only windows everything previous rested on. Session run autonomously per Derek's ask.
+
+**Did — `ml/live_cluster_verdict.py` (ruff+mypy clean, re-runnable as data accrues).** Loads the synced S3 snapshots, joins Kalshi settlements + decision-minute candles (batch endpoint, chunked under its ~10k-candle budget — full-day ranges 400) + Coinbase minute bars, fits the displacement logistic on the 6,100-window warehouse history STRICTLY before 06-05 (forward/OOS by construction; warehouse itself is frozen at 06-03 since local Airflow didn't run), and prices the SAME strategy three ways per window: (1) decide+fill at the W+k candle close (the sweep's assumption), (2) the same bets filled at the live touch, (3) full live replay (decide from the snapshot's own spot against the live ask). Day-block bootstrap CIs throughout; parameterized `k ∈ {2, 13}`.
+
+**Result — the cluster fails at its OWN prices, and execution is a wash at W+13:**
+- **W+13** (650 windows): backfill-candle leg **−3.7% [−6.5%, −1.4%]**; same-bets-live-fills −3.7%; live replay −2.7% [−6.0%, −0.3%]; naive follow-move −2.8% both pricings. The in-period sweep cluster (~+5–7%, W+12 peak +7.2% [+4.2,+10.1]) doesn't even CI-overlap the fresh period.
+- **Execution is NOT the killer at W+13:** paired (leg1−leg2) cost +0.1% [−0.3%, +0.4%]; side-conditional slippage mean +0.04c, median 0, only 34% adverse. The live book ≈ the candle at the decision instant. The signal itself has no out-of-period edge.
+- **W+2** (653 windows): backfill leg **−5.4% [−11.9%, +2.0%]**, live replay −5.0% — the W+1-style displacement edge is gone this period too. Here the lead-lag mechanism IS still visible where it should be: naive follow-move −2.4% at candle → −5.6% at live fills, and the burst mid still chases spot (R²=0.75, +17c/$100, n=658 — replicating the 37-window R²=0.92/+24c finding, attenuated at scale). At W+13 the coupling is much weaker (R²=0.33): near expiry the book is gappier/more discrete, not faster.
+- **W+15 books are DEAD: only 17% of last-minute snapshots have a two-sided quote.** Even a real near-expiry signal would have nothing to trade against (and no exit) — the operational closure of the settlement-lag thread at minute resolution.
+
+**Verdict: the W+9–13 "profit cluster" was in-period selection noise (max over 14 minutes in one regime), not a tradeable edge and not even a stable execution artifact.** Exactly what the sweep's own warnings (±3–4% day-block CIs, split-half +0.21) predicted — the uncertainty discipline called it before the live data confirmed it. Displacement-family strategies are now negative at every tested decision minute, at both backfill and live prices, out-of-period.
+
+**Learned:**
+- An in-period day-block CI is still conditional on the period AND the selection (picking W+12 of 14 minutes biases it up); only a fresh-period replication is an honest test. The cluster's [+4.2,+10.1] vs the fresh [−6.5,−1.4] is the cleanest demonstration of that in the whole project.
+- "Artifact vs real" was the wrong dichotomy — the third option, "neither survives the period," is what actually happened. Test the signal out-of-period BEFORE explaining its mechanism.
+- Kalshi's batch candlesticks endpoint budgets `n_tickers × range_minutes` (~10k); chunk windows, not days.
+- The platform asymmetry showed its value: serverless collection kept running unattended; the laptop-bound Airflow batch (warehouse frozen at 06-03) did not. The irreproducible data (live books) was the part that survived — by design.
+
+**▶ NEXT:**
+1. **The write-up (README + dashboard) is now THE move** — the README status table still says "ML: Planned" (stale since 06-01) while the actual arc (benchmark → leak-hunt → +8% saga → live verdicts → 10 nulls) is the portfolio centerpiece. No remaining analysis blocks it.
+2. The Lambda keeps accruing (~$0/mo); `ml/live_cluster_verdict.py 13|2` can be re-run as days pile up to tighten the CIs, but with every leg negative the prior is firmly closed. Consider stopping the EventBridge rule once the write-up freezes the numbers (or keep it for the dashboard's live tile).
+3. `ml/live_paper_pnl.py` (full-feature forward test) stays blocked on the batch pipeline being run — moot for alpha (cluster closed), but running one `dbt build` + re-run would tie off the W+1 thread with the production model for completeness.
+4. Push to GitHub: main is 4 commits ahead (the entire Lambda collector + 3 analysis sessions exist only locally).
+
+---
+
 ## 2026-06-05 (cont.) — Deribit options-implied + market-making: both null (the last two threads close)
 
 Ran the final two backlog angles — the only ones bringing *new* information (options) or a *different role* (providing vs taking liquidity).
