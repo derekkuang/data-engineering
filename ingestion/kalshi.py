@@ -185,8 +185,14 @@ class KalshiClient:
     ) -> dict[str, list[dict[str, Any]]]:
         """Candlesticks for many markets in ONE call (Kalshi allows up to 100 tickers
         and 10,000 candlesticks per request), chunked at 100. Returns
-        ``{market_ticker: candlesticks}``. A whole day of 15-min markets (~96 × 16
-        bars) fits in one call — far fewer requests than per-market fetching."""
+        ``{market_ticker: candlesticks}``.
+
+        CAUTION — the ~10k-candlestick budget is ``n_tickers × range_minutes``, NOT
+        the number of bars that actually exist: a whole-day range (1,440 min) with
+        96 tickers is rejected with a 400 even though only ~1,500 bars would return.
+        Callers must keep ``len(chunk) × minutes(start_ts..end_ts)`` under ~10k —
+        e.g. group consecutive 15-min windows so the shared range stays tight (see
+        ml/live_cluster_verdict.py's greedy chunking)."""
         out: dict[str, list[dict[str, Any]]] = {}
         for i in range(0, len(market_tickers), 100):
             chunk = market_tickers[i : i + 100]

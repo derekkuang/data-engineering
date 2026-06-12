@@ -1,6 +1,7 @@
 name: dbt CI
 
-# Runs `dbt build` (compile -> run -> test, including the point-in-time
+# Runs pytest (the unit-tested money math + walk-forward guarantees) and
+# `dbt build` (compile -> run -> test, including the point-in-time
 # correctness singular test) against Athena on every push and pull request.
 #
 # AWS auth is via GitHub OIDC federation into a scoped IAM role -- NO long-lived
@@ -25,6 +26,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  pytest:
+    # Pure-Python unit tests (money math, walk-forward leakage guarantees) —
+    # no AWS access needed, so they fail fast and run on forks too.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (locked)
+        run: uv sync --frozen
+
+      - name: pytest
+        run: uv run pytest -q
+
   dbt-build:
     runs-on: ubuntu-latest
     env:

@@ -1,0 +1,76 @@
+name: scheduled pipeline
+
+# The unattended production path: daily Coinbase + Kalshi ingest into the S3 raw
+# zone, then `dbt build` (models + schema/PIT tests) to refresh the marts. Exists
+# because a laptop is not an orchestrator — while the local Airflow stack is off,
+# this keeps the warehouse current (the serverless order-book collector already
+# covers the live-only data).
+#
+# Both ingests are idempotent day-partition overwrites, so reruns and catch-ups
+# are safe; dispatch manually with a larger `days` to backfill a gap.
+#
+# Auth is the same GitHub OIDC federation as CI (docs/setup/04) — the crypto-de-ci
+# role already carries raw-bucket s3:PutObject, Athena, and Glue permissions.
+
+on:
+  schedule:
+    - cron: "30 2 * * *" # daily 02:30 UTC, after the prior UTC day is complete
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "How many days back to (re-)ingest (idempotent overwrites)"
+        default: "2"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  # Same group as CI on main: Iceberg MERGEs must not run concurrently against
+  # the same marts, so the scheduled build queues behind any in-flight CI build.
+  group: dbt-ci-refs/heads/main
+  cancel-in-progress: false
+
+jobs:
+  ingest-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      AWS_REGION: us-east-1
+      S3_BUCKET: derekkuang-crypto-de-raw-546712138633-us-east-1-an
+      KALSHI_API_BASE: https://external-api.kalshi.com/trade-api/v2
+      ATHENA_WORKGROUP: crypto_wg
+      ATHENA_S3_STAGING_DIR: s3://derekkuang-crypto-de-raw-546712138633-us-east-1-an/athena-results/
+      DBT_PROFILES_DIR: ${{ github.workspace }}/dbt
+      INGEST_DAYS: ${{ inputs.days || '2' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::546712138633:role/crypto-de-ci
+          aws-region: us-east-1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (locked)
+        run: uv sync --frozen
+
+      - name: Ingest Coinbase OHLCV (BTC + ETH)
+        run: uv run python -m ingestion.backfill --products BTC-USD,ETH-USD --days "$INGEST_DAYS"
+
+      - name: Ingest Kalshi 15-min markets
+        run: uv run python -m ingestion.kalshi_backfill --days "$INGEST_DAYS"
+
+      - name: dbt deps
+        working-directory: dbt
+        run: uv run dbt deps
+
+      - name: dbt build (run + test, incl. PIT correctness test)
+        working-directory: dbt
+        run: uv run dbt build

@@ -1,295 +1,172 @@
 # data-engineering
 
-**Project: Crypto Market Data Engineering Pipeline**
+**Project: Crypto Market Data Engineering Platform — and an honest hunt for an edge it was never supposed to find**
 
 ---
 
 **Goal**
 
-Build a production-grade ELT pipeline that ingests crypto market and on-chain data at minute granularity, transforms it into a point-in-time-correct feature mart using dbt, orchestrates it with Airflow, and surfaces a downstream ML demo (volatility nowcasting or regime classification) plus a Streamlit dashboard. The finished product should be something you can walk an interviewer through end-to-end and explain every architectural decision.
+Build a production-grade ELT platform that ingests crypto market data at minute-to-tick granularity, transforms it into a point-in-time-correct feature mart with dbt, orchestrates it with Airflow + scheduled cloud runs, and stress-tests an ML layer against a real prediction market (Kalshi's 15-minute BTC binaries) with walk-forward validation, real cost modeling, and live-execution experiments. The finished product is something you can walk an interviewer through end-to-end and explain every architectural decision — including why the model, correctly evaluated, makes no money.
 
-**The framing rule.** This is not a Bitcoin price-prediction project. It is a *data platform* project that happens to use crypto data: a point-in-time-correct feature store, incremental loads, a tested transformation layer, and a backtesting harness. The model at the end is a small demonstration that the platform works — not the point. Read this paragraph again every time you are tempted to over-invest in the model.
+**The framing rule.** This is not a Bitcoin price-prediction project. It is a *data platform* project that happens to use crypto data: a point-in-time-correct feature store, incremental loads, a tested transformation layer, and a research harness rigorous enough to kill its own results. The model at the end demonstrates that the platform works — not that markets are beatable. This rule was written before the ML work began, and the ML work proved it right.
 
 ---
 
-**Project Status** (updated 2026-06-01) — the rest of this README describes the full target architecture; this table is the source of truth for what actually exists today.
+**Project Status** (updated 2026-06-12) — this table is the source of truth for what exists today.
 
 | Component | Status | Notes |
 |---|---|---|
-| Coinbase → S3 ingestion | ✅ Built | Paginated, rate-limited, idempotent Parquet writes; BTC + ETH 1-min, ~180k rows |
-| Athena + Glue over S3 raw | ✅ Built | External table, partition projection, least-privilege IAM, healthcheck |
-| dbt staging + intermediate | ✅ Built | `stg_coinbase_ohlcv` (view), `int_price_features` (~25 features, view) |
-| dbt mart + PIT test | ✅ Built | `fct_features_pit` (incremental Iceberg/MERGE) + custom point-in-time singular test |
-| GitHub Actions CI (OIDC → `dbt build`) | ✅ Built | Green on push — assumes IAM role via OIDC (no stored keys), runs `dbt build` + schema/PIT tests against Athena |
-| Airflow `crypto_price_ingest` DAG | ✅ Built | Astro Runtime 3 / Airflow 3, dynamic task mapping; runs locally |
-| Kalshi 15-min ingestion (public client + backfill + live DAG task) | ✅ Built | `KXBTC15M` implied-prob/spread/result → S3 Parquet; backfill + live Airflow task; Glue DDL in `docs/setup/05` (run with owner perms) |
-| Kalshi → mart join + directional label | ✅ Built | `stg_kalshi_btc_15min` → `int_kalshi_implied_prob` → `kalshi_implied_prob` joined PIT-safe into `fct_features_pit`; `fct_kalshi_15min_label` (forward up/down, out of PIT store) |
-| ML model + walk-forward backtest | ⬜ Planned | Kalshi-benchmarked, cost-aware (net of spread/fees) |
-| `crypto_features_refresh` DAG (run→test→inference) | ⬜ Planned | The second DAG; quality-gated inference |
-| ML model + walk-forward backtest | ⬜ Planned | Kalshi-benchmarked, cost-aware |
-| Streamlit dashboard | ⬜ Planned | Features + predictions + PnL |
+| Coinbase → S3 ingestion | ✅ Built | Paginated, rate-limited, idempotent Parquet writes; BTC + ETH 1-min bars |
+| Athena + Glue over S3 raw | ✅ Built | External tables, partition projection, least-privilege IAM, healthchecks |
+| dbt staging → intermediate → marts | ✅ Built | `fct_features_pit` (incremental Iceberg/MERGE) + custom point-in-time singular test |
+| GitHub Actions CI | ✅ Built | OIDC into a scoped IAM role (no stored keys): `pytest` + `dbt build` (schema + PIT tests) on every push |
+| Scheduled cloud pipeline | ✅ Built | GitHub Actions cron: daily Coinbase + Kalshi ingest → `dbt build` — the warehouse stays fresh with no laptop running |
+| Airflow `crypto_price_ingest` DAG | ✅ Built | Astro Runtime 3 / Airflow 3, dynamic task mapping; local orchestration demo |
+| Kalshi 15-min market ingestion | ✅ Built | `KXBTC15M` implied-prob/spread/result → S3 Parquet; backfill + live DAG task; PIT-safe join into the mart + forward label |
+| Derivatives + tick-flow ingestion | ✅ Built | Deribit perp funding (US-accessible); Binance Vision aggTrades archive — **53M trades** aggregated to minute taker-flow features |
+| AWS Lambda order-book collector | ✅ Built | Dependency-free handler + CloudFormation (EventBridge cron); banks the **live executable book + BTC spot** at three decision minutes of every 15-min window, 24/7, ~$0/month |
+| ML benchmark → model → cost-aware backtest | ✅ Built | Walk-forward only; Kalshi spread + fee cost model; no-skill controls; bootstrap CIs by day |
+| Live-execution experiments | ✅ Built | Decision-instant reconciliation, latency gate, forward paper-PnL, decision-minute cluster verdict on live books |
+| Unit tests for the research harness | ✅ Built | Money math (fee, PnL/settlement identities) + walk-forward leakage guarantees |
+| Streamlit dashboard | ⬜ Next | The visual telling of the arc below |
+| `crypto_features_refresh` DAG (run→test→inference) | ⬜ Deprioritized | Honest reason: there is no inference worth scheduling — see the finding |
 
-> **Scope note:** the ML target is now **BTC 15-minute directional**, benchmarked against Kalshi's liquid 15-min binary markets and judged cost-aware (calibration + PnL net of spread/fees) — a deliberate change from the original volatility-nowcasting framing. Some sections below (on-chain Etherscan source, volatility-nowcast Q&A, the four-mart diagram) still describe the *original* plan and are being reconciled.
+---
+
+## The Finding — a real platform, and a provably efficient market
+
+The ML layer's job was to answer one question honestly: **using public data, can you beat Kalshi's 15-minute "BTC up or down?" market — net of spread, fees, and execution?** The answer, established over ~10 experiments and two live data-collection campaigns, is **no** — and the way it says no is the strongest part of the project.
+
+The arc (full detail in [docs/devlog.md](docs/devlog.md)):
+
+1. **The market is the benchmark, and it's good.** Kalshi's implied probability scores log loss 0.659 over ~6,100 settled windows and is near-perfectly calibrated (ECE 0.5%). Any model must beat *that*, not a coin flip.
+2. **The first "edge" was a leak.** An early model "beat" the market — because the feature set quietly included the market's own price. Excluding all market-derived columns, a walk-forward logistic on pure BTC price/vol features **ties** the market (0.655 vs 0.662). Fancier models don't help: LightGBM is worse and miscalibrated.
+3. **A +8% backtest survived five leak-hunts…** The cost-aware backtest (real spreads, Kalshi's fee formula, bet only when the model clears the ask) showed +8% ROI, robust to 3× spread, with every no-skill control losing money.
+4. **…so we tested it against reality.** A collector banked the live executable order book at the decision minute. Verdict: the backtest price was real and hittable (slippage unbiased), **but the book reprices ~0.19c/s, tracking BTC spot at R²=0.92** — the edge is a *latency-bound lead-lag artifact* the size of the friction protecting it. Measured end-to-end decision→order latency (~0.6s) is 50× inside the breakeven, but capturing the edge means winning a repricing race against co-located market makers — the wall is competition, not wiring.
+5. **Every alternative angle is null, and each null is measured, not assumed:** model class, Deribit funding, Binance order flow (53M trades), favorite-longshot bias, settlement-lag at minute resolution, threshold-ladder arbitrage, options-implied direction (structurally null — options price vol, not 15-min direction), market-making (the fee alone exceeds the half-spread), and less-liquid markets — where the best insight of the project lives: **HYPE's 15-min market is measurably *inefficient* (priced like a coin flip), but its 9c spread scales *with* the inefficiency, trapping it.** Markets are efficient exactly to the limits of arbitrage.
+6. **The final test killed the last survivor.** A per-minute sweep had flagged a W+9–13 decision-minute "profit cluster" (~+5–7%, with the honest caveat that day-block bootstrap CIs were ±3–4% and the ranking was split-half unstable). An AWS Lambda collector then banked live books at that minute 24/7 for a week: on **650 fresh out-of-sample windows, the cluster loses −3.7% [−6.5%, −1.4%] at its own assumed prices**, and execution there is a wash (+0.1% paired cost). It wasn't even an execution artifact — it was in-period selection noise, exactly what the uncertainty analysis had warned. The near-expiry book is also 83% empty: nothing to trade against even if a signal existed.
+
+Why this is the portfolio centerpiece rather than a failure: every number above required the platform — PIT-correct features (so the ties are real ties, not leaks), incremental marts (so 70 days × 96 windows × 4 sources stay joinable), serverless collection (the live books are the one irreproducible dataset; the Lambda kept capturing while the laptop slept), and a harness that prices every claim in dollars with controls and day-block confidence intervals. The deliverable is a platform that can tell microstructure from alpha — and a researcher who kills his own result.
 
 ---
 
 **The Stack**
 
-- **Ingestion:** Python scripts pulling from Coinbase Exchange (price) and Etherscan / mempool.space (on-chain), watermark-driven incremental loads
-- **Orchestration:** Apache Airflow — two DAGs (15-minute price ingest, hourly feature refresh)
-- **Warehouse:** Amazon Athena (serverless, pay-per-scan), querying S3 Parquet in place via the Glue Data Catalog — a lakehouse, not a load-and-store warehouse
-- **Transformation:** dbt Core (`dbt-athena`) — **incremental models are mandatory** at minute granularity; marts materialize as Iceberg tables for clean incremental `MERGE`. This is the centerpiece
-- **Storage layer:** AWS S3 as a raw landing zone (Parquet, partitioned by date)
-- **ML demo:** lightgbm or sklearn for volatility nowcasting or regime classification, with walk-forward backtest
-- **Visualization:** Streamlit dashboard for features + backtested predictions + PnL with realistic costs
-- **Infrastructure:** Docker for Airflow (Astronomer Astro CLI), GitHub Actions for CI running dbt tests on every push
-- **Version control:** Git throughout, public on GitHub
-
----
-
-**The Dataset**
-
-Two assets, two-to-three data sources, one year of history.
-
-**Assets:** BTC-USD and ETH-USD. Two pairs is plenty — adding more is volume, not depth.
-
-**Granularity:** 1-minute OHLCV bars. ~525k rows per pair per year. Two pairs ≈ 1M rows of price data, plus on-chain.
-
-**Sources (all free):**
-
-| Layer | Source | What you get | Cadence |
-|---|---|---|---|
-| Price | Coinbase Exchange API (or Binance public) | OHLCV 1-min bars | Real-time |
-| On-chain (BTC) | mempool.space API | Mempool size, avg fee, tx count | ~10 min blocks |
-| On-chain (ETH) | Etherscan free API (or Alchemy free tier) | Gas prices, large transfers, active addresses | ~12 sec blocks |
-| Derivatives (optional) | Binance futures public API | Funding rates, open interest | 8-hourly |
-| Sentiment (optional) | alternative.me Fear & Greed Index | Daily 0-100 score | Daily |
-
-**Recommendation for v1: price + one on-chain source.** Two sources is enough to demonstrate multi-source time-joins; adding more is scope creep before the foundations are tested. Add the third source in v1.1 once the pipeline is green.
+- **Ingestion:** Python (httpx, stdlib-only inside Lambda) pulling Coinbase Exchange OHLCV, Kalshi market data (public, read-only), Deribit funding, and Binance Vision aggTrade archives; watermark-driven incremental loads, idempotent day-partition overwrites
+- **Collection (serverless):** AWS Lambda + EventBridge cron + CloudFormation — live order-book snapshots at chosen decision minutes, 24/7, dependency-free deploy zip
+- **Warehouse:** Amazon Athena (serverless, pay-per-scan) querying S3 Parquet in place via the Glue Data Catalog — a lakehouse, not a load-and-store warehouse
+- **Transformation:** dbt Core (`dbt-athena`) — incremental models mandatory at minute granularity; marts materialize as Iceberg tables for clean incremental `MERGE`. This is the centerpiece
+- **Orchestration:** Airflow (Astro Runtime 3 / Airflow 3, Docker) locally + GitHub Actions cron for the unattended daily pipeline
+- **ML / research:** scikit-learn + LightGBM, walk-forward only, with a cost model (real spreads + Kalshi fee), no-skill controls, day-block bootstrap CIs, and live-execution reconciliation
+- **CI:** GitHub Actions via OIDC federation (no stored AWS keys): `pytest` + `dbt build` against the real warehouse on every push
+- **Visualization (next):** Streamlit dashboard of the features, the experiments, and the honest arc
 
 ---
 
 **The Architecture**
 
 ```
-Coinbase API (price) + Etherscan API (on-chain)
-        ↓
-Python Ingestion (incremental, watermark-driven, rate-limit-aware)
-        ↓
-AWS S3 (raw landing — Parquet, partitioned by date) — single source of truth
-        ↓
-Athena + Glue Data Catalog (external table over S3 — queried in place, no load step)
-        ↓
-dbt (transformation layer — all marts incremental, materialized as Iceberg)
-    ├── Staging models       — type-cast, dedupe on (asset_id, event_at)
-    ├── Intermediate models  — compute features per source
-    └── Mart models:
-            ├── fct_minute_bars        — OHLCV fact table
-            ├── fct_features_pit       — point-in-time feature store (CROWN JEWEL)
-            ├── fct_model_predictions  — model output written back
-            └── dim_assets             — asset dimension
-        ↓
-Airflow DAGs:
-    ├── crypto_price_ingest      — every 15 min, incremental load
-    └── crypto_features_refresh  — hourly: dbt run → dbt test → model inference
-        ↓
-Streamlit Dashboard (features + backtested predictions + PnL with realistic costs)
+Coinbase OHLCV     Kalshi 15-min markets     Deribit funding     Binance aggTrades (53M)
+      ↓                    ↓                       ↓                      ↓
+            Python ingestion (incremental, watermark-driven, rate-limited)
+                                      ↓
+        AWS S3 raw zone (Parquet, dt-partitioned)  ←──  AWS Lambda collector
+                                      ↓                  (EventBridge 24/7:
+        Athena + Glue Data Catalog (queried in place)    live order book + spot
+                                      ↓                   at decision minutes)
+        dbt: staging → intermediate → marts
+            ├── fct_features_pit        — point-in-time feature store (CROWN JEWEL)
+            ├── fct_kalshi_15min_label  — forward label, kept OUT of the PIT store
+            └── fct_btc_15min_training  — features ⋈ market quote ⋈ label, PIT-safe
+                                      ↓
+        ml/ research harness
+            ├── benchmark_eda · train_baseline · backtest (cost-aware, controls)
+            ├── live_exec_reconcile · live_paper_pnl · live_cluster_verdict
+            └── settlement_lag · decision_minute_profit · favorite_longshot · …
+                                      ↓
+        [next] Streamlit dashboard
+
+Orchestration: Airflow DAG (local demo) + GitHub Actions cron (unattended daily
+ingest → dbt build) + CI (pytest + dbt build on every push, OIDC, no stored keys)
 ```
 
 ---
 
 **dbt — The Centerpiece**
 
-This is what interviewers will actually ask about. At minute granularity, dbt stops being "SQL with templates" and starts being a serious data modeling tool.
+At minute granularity, dbt stops being "SQL with templates" and starts being a serious data modeling tool.
 
 **Model layers:**
-- `staging/` — one model per source table, light cleaning only. Example: `stg_coinbase_ohlcv.sql` type-casts timestamps, dedupes on `(asset_id, event_at)`, drops bars with null close.
-- `intermediate/` — feature computation per source. Example: `int_price_features.sql` computes 5/15/60-minute returns, rolling realized volatility, RSI, Bollinger band positions.
-- `marts/` — final business-facing tables. Example: `fct_features_pit.sql` joins price + on-chain features at minute granularity with point-in-time correctness.
+- `staging/` — one model per source table, light cleaning only: type-casts, dedupes on `(asset_id, event_at)`
+- `intermediate/` — feature computation per source (returns, rolling realized volatility, RSI, Bollinger positions, Kalshi implied-prob at the decision minute)
+- `marts/` — `fct_features_pit` joins sources at minute granularity with point-in-time correctness; `fct_btc_15min_training` adds the market quote and forward label for the ML layer
 
-**Incremental models are mandatory.** Full refreshes on millions of rows are wasteful and slow. Use `materialized='incremental'` with `unique_key=['asset_id', 'event_at']` and an `is_incremental()` filter that processes only new bars since the last run. Backfills remain deterministic via `dbt run --full-refresh`.
+**Incremental models are mandatory.** Full refreshes on millions of rows are wasteful and slow. Marts use `materialized='incremental'` on Iceberg with `unique_key` MERGE semantics and an `is_incremental()` watermark; backfills stay deterministic via `--full-refresh`.
 
-**Point-in-time correctness — the crown jewel.** `fct_features_pit` must guarantee that the row at timestamp T contains only information knowable at T. No look-ahead. No peeking. This is the single biggest concept that separates ML-ready feature engineering from "I shuffled my time series and got 95% accuracy."
+**Point-in-time correctness — the crown jewel.** `fct_features_pit` guarantees that the row at timestamp T contains only information knowable at T. A custom dbt **singular test** proves it: recompute a sample row's features from raw data using only `event_at <= T` and assert equality (demonstrated to fail under look-ahead). This guarantee is why the ML results above can be trusted — when the model *tied* the market, that was real, and when it "won," the PIT discipline is what exposed the leak.
 
-**Tests:**
-- Schema tests for every model: `not_null`, `unique`, `accepted_values`, `relationships`
-- **A custom singular test that proves point-in-time correctness:** pick a row at time T, recompute its features using only `event_at <= T`, assert they match. *This one test, mentioned in your README, is worth more than any model accuracy number.*
-- Additional singular tests: no negative volumes, high ≥ low, no future timestamps
-- `dbt test` runs in GitHub Actions on every push
-
-**Documentation:**
-- `description:` fields for every model and every column in `schema.yml`
-- Run `dbt docs generate` and `dbt docs serve` — screenshot for the README
-- Embed the dbt-docs DAG screenshot in the README
-
-**A sample incremental staging model:**
-```sql
--- models/staging/stg_coinbase_ohlcv.sql
-{{ config(
-    materialized='incremental',
-    unique_key=['asset_id', 'event_at']
-) }}
-
-with source as (
-    select * from {{ source('raw', 'coinbase_ohlcv') }}
-    {% if is_incremental() %}
-      where event_at > (select coalesce(max(event_at), '2000-01-01') from {{ this }})
-    {% endif %}
-),
-cleaned as (
-    select
-        product_id                  as asset_id,
-        time::timestamp             as event_at,
-        open::numeric(18,8)         as open_price,
-        high::numeric(18,8)         as high_price,
-        low::numeric(18,8)          as low_price,
-        close::numeric(18,8)        as close_price,
-        volume::numeric(28,8)       as volume
-    from source
-    where close is not null
-      and volume >= 0
-      and high >= low
-)
-select * from cleaned
-```
+**Tests:** schema tests (`not_null`, `unique`, `accepted_values`, `relationships`) on every model, the PIT singular test, and physical-sanity singular tests (no negative volumes, high ≥ low, no future timestamps). All run in CI against the real warehouse on every push.
 
 ---
 
-**Airflow — The Orchestration Layer**
+**Orchestration — two layers, deliberately**
 
-Run Airflow locally with Docker (Astronomer Astro CLI). The project lives in `airflow/` (Astro Runtime 3 / Airflow 3); `astro dev start` brings up the stack.
+- **Airflow (`airflow/`, Astro Runtime 3):** the `crypto_price_ingest` DAG demonstrates TaskFlow + dynamic task mapping over the product list, running locally under Docker. It is the orchestration *showcase*.
+- **GitHub Actions cron (`.github/workflows/pipeline.yml`):** the unattended *production path* — daily Coinbase + Kalshi ingest followed by `dbt build`, authenticated via OIDC into the same scoped role as CI. Both ingests are idempotent day-overwrites, so reruns and catch-ups are safe by construction. This exists because the honest lesson of running the project was that a laptop is not an orchestrator: the serverless collector kept capturing while the local Airflow stack was off.
 
-> **Status:** DAG 1 (`crypto_price_ingest`) is **built and runs** — see `airflow/dags/crypto_price_ingest.py`. It uses TaskFlow + dynamic task mapping over the product list. DAG 2 (`crypto_features_refresh`) is **planned**. The description below is the target design for both.
-
-**Two DAGs, not one.** Crypto data moves faster than the daily-batch pattern assumes, so split ingestion from transformation:
-
-**DAG 1: `crypto_price_ingest`** — runs every 15 minutes
-1. `fetch_new_bars` — Python operator pulling new bars from Coinbase since last watermark
-2. `upload_to_s3` — write Parquet to `s3://.../raw/coinbase_ohlcv/dt=YYYY-MM-DD/`
-3. `update_watermark` — record the latest ingested timestamp
-
-   (No load step — Athena queries the new Parquet in place via partition projection. The lakehouse pays off here: landing the file *is* loading it.)
-
-**DAG 2: `crypto_features_refresh`** — runs hourly
-1. `dbt_run_staging` — `dbt run --select staging`
-2. `dbt_run_intermediate` — `dbt run --select intermediate`
-3. `dbt_run_marts` — `dbt run --select marts`
-4. `dbt_test` — `dbt test`; **failure halts downstream tasks**
-5. `run_inference` — load `fct_features_pit`, run model, write predictions to `fct_model_predictions`
-6. `notify_on_failure` — Slack/email alert
-
-The `dbt_test >> run_inference` dependency is the single most important Airflow design decision in this project: it gates model inference on data quality. Bad data never reaches the model.
-
-**A sample DAG skeleton:**
-```python
-from airflow import DAG
-from airflow.operators.bash import BashOperator
-from airflow.operators.python import PythonOperator
-from datetime import datetime, timedelta
-from ingestion.coinbase import fetch_new_bars
-
-default_args = {
-    'owner': 'derek',
-    'retries': 2,
-    'retry_delay': timedelta(minutes=5),
-    'email_on_failure': True,
-}
-
-with DAG(
-    dag_id='crypto_price_ingest',
-    default_args=default_args,
-    schedule_interval='*/15 * * * *',
-    start_date=datetime(2026, 1, 1),
-    catchup=False,
-    tags=['crypto', 'ingest'],
-) as dag:
-
-    fetch = PythonOperator(
-        task_id='fetch_new_bars',
-        python_callable=fetch_new_bars,
-    )
-
-    upload = PythonOperator(
-        task_id='upload_to_s3',
-        python_callable=upload_parquet_to_s3,
-    )
-
-    fetch >> upload  # no warehouse-load task — Athena reads the S3 Parquet directly
-```
-
----
-
-**Getting Started — Step By Step**
-
-**Week 1: Infrastructure and raw ingestion**
-1. Write the Coinbase ingestion script — pull 2 months of BTC-USD and ETH-USD 1-min bars, upload Parquet to `s3://.../raw/coinbase_ohlcv/dt=YYYY-MM-DD/`
-2. **Implement incremental loads with a watermark** — the second run must only fetch new bars
-3. Set up Athena over the S3 raw zone (Glue external table + partition projection, workgroup, healthcheck) — see `docs/setup/03-athena-s3.md`
-4. Confirm raw data is queryable in Athena and the incremental contract holds
-5. Install Astro CLI, `astro dev init`
-
-**Week 2: dbt transformation layer (the heart of the project)**
-1. `uv add dbt-athena-community`, then `dbt init` (profile: `type: athena`, workgroup `crypto_wg`, region `us-east-1`)
-2. Write `stg_coinbase_ohlcv.sql` as an incremental model
-3. Write `int_price_features.sql` (returns, rolling realized volatility, RSI)
-4. Add the on-chain source — write `stg_etherscan_gas.sql` and `int_onchain_features.sql`
-5. Write `fct_features_pit.sql` — the point-in-time feature mart
-6. **Write the PIT-correctness singular test** (non-negotiable; this is the project's signature)
-7. Add schema tests for every model
-8. `dbt docs generate` — screenshot for the README
-
-**Week 3: Orchestration, ML demo, CI, polish**
-1. Wire the two Airflow DAGs
-2. Train a simple model (lightgbm) on `fct_features_pit`. Target options:
-   - **Realized volatility nowcast** (recommended — models genuinely work)
-   - **Regime classification** (high-vol vs low-vol)
-   - Directional prediction — only if reported honestly with walk-forward results and transaction costs
-3. Walk-forward validation only — no shuffled splits, no data leakage
-4. Write predictions back to `fct_model_predictions` from an Airflow task
-5. Set up GitHub Actions to run `dbt test` on every push (use dbt's official action)
-6. Build a Streamlit dashboard: features over time, predictions, backtest PnL with 5bps transaction costs
-7. Write the README sections explaining architecture and *why* PIT correctness matters
-8. Record a 2-minute Loom walkthrough; link in README
+The quality gate is preserved in both paths: `dbt build` runs models *and* tests together — a test failure fails the run before anything downstream consumes bad data.
 
 ---
 
 **What To Say In An Interview**
 
 *"Walk me through your dbt project structure."*
-Staging → intermediate → marts. Staging dedupes and type-casts per source table. Intermediate computes features per source. Marts are business-facing; `fct_features_pit` joins price + on-chain features at minute granularity with point-in-time correctness.
+Staging → intermediate → marts. Staging dedupes and type-casts per source. Intermediate computes features per source. Marts are business-facing: `fct_features_pit` joins price features at minute granularity with point-in-time correctness, and `fct_btc_15min_training` adds the Kalshi quote and the forward label — with the label kept out of the PIT store by design.
 
 *"What does 'point-in-time correct' actually mean?"*
-The feature row at timestamp T uses only data with `event_at <= T`. No look-ahead. I have a custom dbt singular test that proves it by recomputing a sample row from raw data and asserting equality. Without this guarantee, a time-series ML model trained on the features is lying to itself.
+The feature row at timestamp T uses only data with `event_at <= T`. No look-ahead. A custom dbt singular test proves it by recomputing a sample row from raw data and asserting equality. Without this, a time-series model is lying to itself — and in this project the discipline paid for itself by catching a leaked market price that had produced a fake "edge."
 
 *"Why incremental models?"*
-At minute granularity, a year of two assets is ~1M rows of price data alone, growing daily. Full refreshes are wasteful and slow. Incremental models with `unique_key=(asset_id, event_at)` and an `is_incremental()` watermark process only new bars each run. Backfills are still deterministic via `--full-refresh`.
+At minute granularity a year of data is millions of rows, growing daily. Incremental Iceberg models with MERGE semantics process only new bars; backfills stay deterministic via `--full-refresh`.
 
 *"What happens if a dbt test fails?"*
-The features_refresh DAG halts at `dbt_test` and never reaches `run_inference`. The mart is not updated and the model is not run on bad data. Quality gating downstream of tests is the whole point of the orchestration design.
+`dbt build` interleaves run and test, so a failure halts the build before downstream models or any consumer sees bad data — in CI, in the scheduled pipeline, and in the DAG design.
 
 *"How does the model perform?"*
-[Honest answer.] For directional prediction, ~52% accuracy out-of-sample, not profitable after 5bps transaction costs. The volatility nowcasting model performs meaningfully better — but the point of this project is the platform, not the alpha. Production ML is mostly about the pipeline feeding the model.
+[The honest answer, and the best conversation in the project.] A leakage-free walk-forward logistic *ties* the market's log loss (0.655 vs 0.662). A cost-aware backtest showed +8% ROI that survived five leak-hunts — so I collected live order books and showed it's a latency-bound lead-lag artifact: the book reprices with spot at R²=0.92 before a bet can fill. A second live campaign (AWS Lambda, 650 windows) killed the last candidate edge as in-period selection noise: −3.7% out-of-period at its own assumed prices. Roughly ten angles, all null, each one *measured*. The market is efficient to the limits of arbitrage — I can show exactly where the friction sits, in cents.
 
 *"Why Athena over Snowflake/Redshift?"*
-It's a lakehouse, not a warehouse: the Parquet in S3 is the single source of truth and Athena queries it in place — no load step, no cluster to manage, no compute running when idle. Pay-per-scan is near-zero at this data volume, and partition projection prunes scans to the `dt` partitions a query needs. It also keeps the stack single-cloud (no cross-cloud egress) and Phase-3-ready: the same S3 Parquet is readable by Spark (Glue/EMR) for tick-data aggregation. Trade-off I made consciously: dbt incremental models need Iceberg table format on Athena to get clean `MERGE` semantics — slightly more setup than Snowflake, which I document.
+It's a lakehouse: the Parquet in S3 is the single source of truth and Athena queries it in place — no load step, no idle compute. Partition projection prunes scans; pay-per-scan is near-zero at this volume; and the same S3 Parquet stays readable by Spark for the tick-data work (the 53M-trade Binance aggregation). Conscious trade-off: dbt incremental models need Iceberg on Athena for clean MERGE — slightly more setup than Snowflake, documented.
 
 *"What would you do differently in true production?"*
-Secrets via Vault, not env files. Feature store (Feast) instead of a dbt mart for low-latency serving. Row-count anomaly detection on each load. Schema contracts via dbt 1.5+. Model monitoring for feature drift. Separate dev/staging/prod warehouses.
+Secrets via Vault, not env files. A feature store (Feast) for low-latency serving. Row-count anomaly detection on each load. Schema contracts. Model monitoring for drift. Separate dev/staging/prod warehouses.
 
 ---
 
 **How To Frame It On Your Resume**
 
-> **Only claim what is built and verified.** The bullets below describe the code
-> that exists in this repo today (see the Project Status table near the top).
-> Do not add the dashboard / model / second DAG bullets until those are shipped.
+> **Only claim what is built and verified.** Everything below exists in this repo today.
 
-*Accurate today:*
+- Built an incremental ELT lakehouse on AWS: Python ingestion of four market-data sources (Coinbase OHLCV, Kalshi prediction markets, Deribit funding, Binance tick archives — 53M trades) into an S3 Parquet raw zone, queried in place by Athena via Glue — no load step
+- Designed a dbt-athena medallion layer whose feature mart materializes as an **incremental Iceberg table with MERGE upserts**; engineered a point-in-time-correct feature store and **proved it with a custom dbt singular test** (recomputes features from raw using only backward-looking data; demonstrated to fail under look-ahead)
+- Stood up **GitHub Actions CI and a scheduled cloud pipeline** (daily ingest → `dbt build`) authenticating via **OIDC federation** into a scoped IAM role — no long-lived AWS keys; orchestrated ingestion with an **Airflow DAG** (Astro Runtime 3, dynamic task mapping)
+- Deployed a **dependency-free AWS Lambda collector** (CloudFormation + EventBridge) capturing live order books 24/7 at ~$0/month — the project's one irreproducible dataset
+- Built a **walk-forward, cost-aware ML research harness** (real spreads + fees, no-skill controls, day-block bootstrap CIs, unit-tested money math) benchmarked against a real prediction market, and used it plus **two live-execution campaigns** to prove an apparent +8% backtest edge was a latency-bound microstructure artifact — and a candidate decision-minute cluster was selection noise — across ~10 independently tested angles
 
-- Built an incremental ELT lakehouse on AWS: Python ingestion of minute-granularity Coinbase OHLCV into an S3 Parquet raw zone (idempotent, partition-projected), queried in place by Athena via the Glue Data Catalog — no load step
-- Designed a dbt-athena medallion layer (staging → intermediate → marts) whose feature mart materializes as an **incremental Iceberg table with MERGE upserts**; engineered a point-in-time-correct feature store (~25 price/volatility/momentum features) and **proved it with a custom dbt singular test** that recomputes a feature from raw using only backward-looking data and asserts equality (demonstrated to fail under look-ahead)
-- Stood up **GitHub Actions CI running `dbt build`** (model run + schema/PIT tests) against Athena on every push, authenticating via **GitHub OIDC federation** into a scoped IAM role — no long-lived AWS keys stored; orchestrated ingestion with an **Airflow DAG** (Astro Runtime 3 / Airflow 3, dynamic task mapping) run locally
+*Add once built:* Streamlit dashboard.
 
-*Add once built (currently planned — see Project Status):* hourly `dbt run → test → inference` feature-refresh DAG; Kalshi-benchmarked directional model with walk-forward backtest net of costs; Streamlit dashboard.
+---
 
-The accurate bullets already demonstrate: incremental dbt, point-in-time correctness, Iceberg/lakehouse modeling, OIDC-secured CI for data, and API ingestion. That is the core of the DE skill stack — kept honest.
+**Repo map**
+
+| Path | What's in it |
+|---|---|
+| `ingestion/` | Source clients + backfill CLIs (Coinbase, Kalshi, Deribit, Binance Vision) and S3 writers |
+| `lambda/orderbook_collector/` | The serverless live-book collector (handler + CloudFormation template) |
+| `dbt/` | Staging/intermediate/mart models, schema + PIT tests |
+| `airflow/` | Astro project with the `crypto_price_ingest` DAG |
+| `ml/` | The research harness — one question per script, shared math in `backtest.py`/`model.py`/`data.py` |
+| `tests/` | Unit tests pinning the money math and walk-forward leakage guarantees |
+| `scripts/` | Healthchecks, latency measurement, Lambda deploy |
+| `docs/devlog.md` | The full day-by-day record: every experiment, result, and dead end |
+| `docs/setup/` | One-time infra setup runbooks (Athena, OIDC, Kalshi, Lambda) |
