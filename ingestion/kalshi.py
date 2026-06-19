@@ -42,13 +42,30 @@ MAX_RETRIES = 6
 SERIES_BTC_15M = "KXBTC15M"
 
 
-def _load_private_key(path: str) -> RSAPrivateKey:
-    """Load an RSA private key from a PEM file (``~`` is expanded)."""
-    pem = Path(os.path.expanduser(path)).read_bytes()
+# Env vars that may hold the private key PEM INLINE (pasted into .env), checked in
+# order. Alternatively KALSHI_PRIVATE_KEY_PATH points to a PEM file.
+INLINE_KEY_ENV_VARS = ("KALSHI_PRIVATE_KEY", "KALSHI_PRIVATE_KEY_PEM", "KALSHI_API_PRIVATE_KEY")
+
+
+def _pem_to_key(pem: bytes) -> RSAPrivateKey:
     key = serialization.load_pem_private_key(pem, password=None)
     if not isinstance(key, RSAPrivateKey):
-        raise TypeError(f"{path} is not an RSA private key (Kalshi auth needs RSA)")
+        raise TypeError("configured key is not an RSA private key (Kalshi auth needs RSA)")
     return key
+
+
+def _load_private_key(path: str) -> RSAPrivateKey:
+    """Load an RSA private key from a PEM file (``~`` is expanded)."""
+    return _pem_to_key(Path(os.path.expanduser(path)).read_bytes())
+
+
+def _load_private_key_pem(pem: str) -> RSAPrivateKey:
+    """Load an RSA private key from an inline PEM string (e.g. pasted into .env).
+    Tolerates a single-line PEM whose newlines were flattened to literal ``\\n``."""
+    text = pem.strip()
+    if "-----BEGIN" in text and "\n" not in text:  # flattened single-line PEM
+        text = text.replace("\\n", "\n")
+    return _pem_to_key(text.encode())
 
 
 class KalshiClient:
@@ -60,6 +77,7 @@ class KalshiClient:
         api_base: str | None = None,
         key_id: str | None = None,
         private_key_path: str | None = None,
+        private_key_pem: str | None = None,
         timeout: float = REQUEST_TIMEOUT_SECONDS,
         pace_seconds: float = RATE_LIMIT_SLEEP_SECONDS,
     ) -> None:
@@ -70,15 +88,36 @@ class KalshiClient:
             if private_key_path is not None
             else os.environ.get("KALSHI_PRIVATE_KEY_PATH", "")
         )
+        # Inline PEM (pasted into .env) takes priority over a key file. Accept a few
+        # common var names so it works regardless of exactly what the user named it.
+        inline_pem = private_key_pem
+        if inline_pem is None:
+            for var in INLINE_KEY_ENV_VARS:
+                if os.environ.get(var, "").strip():
+                    inline_pem = os.environ[var]
+                    break
         self.pace_seconds = pace_seconds
-        # Sign only if both a key id and a key file are configured; else public mode.
+        # Auth needs a key id AND a private key. Prefer an inline PEM; if it is absent
+        # OR fails to parse (e.g. an unquoted multiline paste in .env), fall back to a
+        # key file. Else public mode.
         self._key: RSAPrivateKey | None = None
-        if self.key_id and self.private_key_path:
+        if self.key_id and inline_pem and inline_pem.strip():
+            try:
+                self._key = _load_private_key_pem(inline_pem)
+                logger.info("KalshiClient: authenticated mode (inline key)")
+            except (ValueError, TypeError) as exc:
+                logger.warning("inline key did not parse (%s); falling back to key file", exc)
+        if self._key is None and self.key_id and self.private_key_path:
             self._key = _load_private_key(self.private_key_path)
-            logger.info("KalshiClient: authenticated mode")
-        else:
+            logger.info("KalshiClient: authenticated mode (key file)")
+        if self._key is None:
             logger.info("KalshiClient: public (unauthenticated) mode — market data only")
         self._http = httpx.Client(timeout=timeout)
+
+    @property
+    def authenticated(self) -> bool:
+        """True if a signing key is loaded (writes/portfolio endpoints are usable)."""
+        return self._key is not None
 
     # --- signing -----------------------------------------------------------
     def _signed_headers(self, method: str, url: str) -> dict[str, str]:
@@ -111,7 +150,11 @@ class KalshiClient:
                     backoff = RATE_LIMIT_SLEEP_SECONDS * 2**attempt
                     logger.warning(
                         "GET %s -> %s, backing off %.2fs (attempt %d/%d)",
-                        path, resp.status_code, backoff, attempt, MAX_RETRIES,
+                        path,
+                        resp.status_code,
+                        backoff,
+                        attempt,
+                        MAX_RETRIES,
                     )
                     time.sleep(backoff)
                     continue
@@ -123,6 +166,40 @@ class KalshiClient:
                 last_error = exc
                 time.sleep(RATE_LIMIT_SLEEP_SECONDS * 2**attempt)
         raise RuntimeError(f"Kalshi GET {path} failed after {MAX_RETRIES} attempts") from last_error
+
+    def _write(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Signed POST/DELETE with retry/backoff. AUTH IS REQUIRED (no public writes).
+        Kalshi signs ``timestamp + METHOD + path`` only — the JSON body is NOT signed,
+        so the same RSA-PSS header scheme as GET applies."""
+        if self._key is None:
+            raise RuntimeError(f"{method} {path} requires authentication — no key configured")
+        url = f"{self.api_base}{path}"
+        last_error: Exception | None = None
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                headers = self._signed_headers(method, url)
+                resp = self._http.request(method, url, json=body, headers=headers)
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    time.sleep(RATE_LIMIT_SLEEP_SECONDS * 2**attempt)
+                    continue
+                resp.raise_for_status()
+                time.sleep(self.pace_seconds)
+                payload: dict[str, Any] = resp.json() if resp.content else {}
+                return payload
+            except httpx.HTTPStatusError:
+                raise  # 4xx (e.g. rejected order) is informative — don't retry/swallow it
+            except httpx.HTTPError as exc:
+                last_error = exc
+                time.sleep(RATE_LIMIT_SLEEP_SECONDS * 2**attempt)
+        raise RuntimeError(
+            f"Kalshi {method} {path} failed after {MAX_RETRIES} attempts"
+        ) from last_error
+
+    def post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        return self._write("POST", path, body)
+
+    def delete(self, path: str) -> dict[str, Any]:
+        return self._write("DELETE", path)
 
     # --- endpoints ---------------------------------------------------------
     def get_exchange_status(self) -> dict[str, Any]:
@@ -227,6 +304,58 @@ class KalshiClient:
             book = resp.get("orderbook")
         result: dict[str, Any] = book if book is not None else {}
         return result
+
+    # --- perpetual futures (margin) market data ----------------------------
+    # Perps live on a SEPARATE API surface under /margin (same host, public for
+    # market data). Crypto perps settle/fund on the SAME CF Benchmarks RTI that
+    # KXBTC15M settles on (BTC = BRTI), so the perp is a live, tradeable proxy
+    # for the binary's settlement index. Price is quoted in dollars per contract
+    # = index x contract_size (BTC contract_size = 0.0001 -> BTC = price / 0.0001).
+    def list_margin_markets(self, *, status: str | None = None) -> list[dict[str, Any]]:
+        """All perpetual-futures markets (optionally filtered by status)."""
+        params = {"status": status} if status else None
+        resp = self.get("/margin/markets", params=params)
+        markets: list[dict[str, Any]] = resp.get("markets", [])
+        return markets
+
+    def get_margin_market(self, ticker: str) -> dict[str, Any]:
+        resp = self.get(f"/margin/markets/{ticker}")
+        market: dict[str, Any] = resp.get("market", resp)
+        return market
+
+    def get_margin_candlesticks(
+        self, ticker: str, start_ts: int, end_ts: int, period_interval: int = 1
+    ) -> list[dict[str, Any]]:
+        """OHLC of a perp's traded price (bid/ask/price), Unix-second range.
+        ``period_interval`` is minutes (1/60/1440)."""
+        resp = self.get(
+            f"/margin/markets/{ticker}/candlesticks",
+            params={"start_ts": start_ts, "end_ts": end_ts, "period_interval": period_interval},
+        )
+        candles: list[dict[str, Any]] = resp.get("candlesticks", [])
+        return candles
+
+    def get_margin_orderbook(self, ticker: str) -> dict[str, Any]:
+        """Live resting order book for a perp (read-only market data)."""
+        resp = self.get(f"/margin/markets/{ticker}/orderbook")
+        book: dict[str, Any] = resp.get("orderbook", resp)
+        return book
+
+    def get_funding_rates_historical(
+        self, ticker: str | None = None, start_ts: int | None = None, end_ts: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Historical 8-hourly funding rates (capped +/-2%/period). All params
+        optional; omit ``ticker`` to span all perps."""
+        params: dict[str, Any] = {}
+        if ticker:
+            params["ticker"] = ticker
+        if start_ts is not None:
+            params["start_ts"] = start_ts
+        if end_ts is not None:
+            params["end_ts"] = end_ts
+        resp = self.get("/margin/funding_rates/historical", params=params or None)
+        rates: list[dict[str, Any]] = resp.get("funding_rates", [])
+        return rates
 
     def close(self) -> None:
         self._http.close()

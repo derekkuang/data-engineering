@@ -4,6 +4,24 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-06-16/17 — Liquidity-provision pilot: from screen → paper → LIVE real-money market-making (first ~4.6h, +$5.33 realized, edge unconfirmed)
+
+A separate "can this actually make money" track (the platform's directional/arb alpha is closed — all null). Verdict from research: the easy alpha is competed away; structural money is in **liquidity provision** (get paid the spread + maker rebates). Polymarket US is iOS-only with no public trading API → **Kalshi first** (full API, maker fills free).
+
+**Built the full stack this session:**
+- `ml/lp_market_screen.py` (Stage 1, opportunity landscape via `/events`): Sports = ~70% of the gross spread-capture prize but at 1–2c spreads (crowded/efficient); the sweet spot is moderate-spread + real flow.
+- `ml/lp_toxicity_screen.py` (Stage 2, flow markouts): public minute candles can't resolve the sub-minute adverse selection that decides maker P&L (BTC control read benign — its toxicity is sub-minute) → the decisive test needs a **live pilot**.
+- `ml/lp_pilot.py` (paper v2): inventory-capped, kill switch, smooth-market selection. Validated, but fill rate is an upper bound (queue ignored).
+- `ml/lp_live.py` (Phase B, REAL orders): signed POST/DELETE added to the Kalshi client. Staged ladder `--auth-check → --test-order → --live --i-understand-live` (each ~zero-risk; a wrong binding fails as a rejected order). V2 order binding confirmed (`/portfolio/events/orders`, side bid/ask, $-string price, post_only). Inventory **skew** (mean-reverts to flat), **fractional** fill tracking (markets allow partial fills like 0.36), auto-flatten (aggressive IOC), dead-book exit (market resolved), **market-rolling** (roll to a fresh market as each resolves so `--minutes` is wall-clock), per-market + session kill switch, session + per-fill **markout logging** (`data/lp_sessions.csv`, `data/lp_fills.csv`).
+
+**Result (`ml/lp_analyze.py`): 14 markets, 4.6h, 898 fills. REALIZED +$5.36 gross / +$5.33 net of fees ($0.03), 12/14 markets positive; account ~doubled ($5→$11, incl. ~$1.83 of favorable residual settlements on resolved markets = directional luck, not edge).** The edge signal — fill-weighted **markout = −0.04c/fill, session-block 95% CI [−0.18, +0.08]c** → straddles zero: **no measurable adverse selection (the right MM signature) but no confirmed positive edge either.** So the P&L is **spread capture under ~neutral flow** (~+1c/round-trip), not prediction.
+
+**Why some sessions paid and others didn't:** productivity = volume (fills = flow × duration) × per-fill edge. The winners were **high-volume full-game markets** (WNBA total +$2.29/265 fills, NCAA game +$1.04/194, spreads +$1.04) with sustained two-sided retail flow; the duds were **illiquid niche props** (WC "mention": 78 min, 51 fills, ~$0) and **sharp in-play swings** (a tennis match markout −1.1c = a point ran the maker over). So: favor liquid, popular, full-game total/moneyline markets; avoid niche + sharp-event props.
+
+**Honest verdict:** promising but NOT confirmed. Tiny sample (one afternoon, specific games), P&L concentrated (~62% from 2 markets), markout CI includes zero, and ~$5 absolute is meaningless on $5–11 capital. Need many more sessions across days/regimes to tighten the markout CI. **Scaling (only once confirmed):** (1) verify which series are reward-"incentivized" (rebates on top of spread); (2) concurrent multi-market quoting (uncorrelated markets → P&L variance ~1/√N → faster confirmation + diversification) — needs an async loop + shared risk limits; (3) larger size — but bigger orders worsen own queue position/fill rate, so size carefully. Full record: memory `project_lp_market_making_track.md`.
+
+---
+
 ## 2026-06-11 — the W+9–13 cluster VERDICT from the Lambda books: not an execution artifact — *no edge at all* out-of-period (cluster CLOSED)
 
 The Lambda collector ran flawlessly while Derek was away (06-05→06-12 UTC: 288 files/day = 96 windows × 3 bursts at true offsets ~W+1:50 / ~W+12:51 / ~W+14:50; `btc_spot` populated from 06-05 06:14 — the UA fix was redeployed). That gave **~650 settled windows over 8 fresh days with a LIVE executable book + simultaneous spot at the cluster minute** — vs the ~40 W+1-only windows everything previous rested on. Session run autonomously per Derek's ask.
