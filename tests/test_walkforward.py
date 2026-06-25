@@ -7,8 +7,8 @@ training block is never scored. These tests pin both.
 
 import numpy as np
 
-from ml.model import logistic_pipeline, walk_forward_oof
-from ml.walkforward import walk_forward_splits
+from ml.alpha.model import logistic_pipeline, walk_forward_oof
+from ml.alpha.walkforward import walk_forward_splits
 
 
 class TestWalkForwardSplits:
