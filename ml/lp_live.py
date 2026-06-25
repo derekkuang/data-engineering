@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import random
 import sys
 import time
 import uuid
@@ -62,9 +63,20 @@ SAFE_TEST_PRICE = 0.02  # a bid here cannot fill on a real market -> validates p
 # contract of inventory, so inventory mean-reverts to flat (the fix for the +6
 # directional drift). 0.01 = pull the bid 1c lower for each long contract held.
 SKEW_PER_CONTRACT = 0.01
+QUOTE_SIZE = 2  # contracts posted per side per poll (was 1). The scale lever — the cap was
+#                 never binding (held +/-2-3 of 10), so size, not the cap, is what scales us.
 MARKOUT_HORIZON_S = 30  # seconds; the edge signal = did mid move against us post-fill
 DEAD_BOOK_POLLS = 8  # consecutive one-sided/empty polls -> market resolved, end session
 NO_FILL_TIMEOUT_S = 240  # no fills this long -> leave the (illiquid/dud) market and roll
+# ABANDON THIN-AND-NOT-PAYING: low realized FLOW (not just zero fills) usually doesn't pay.
+# Calibrated on 432 logged markets: the <3 fills/min bucket nets ~$0 over 243 markets while
+# the edge is entirely in >=3 fpm (mid 3-6: +$10/101 markets, busy >=6: +$45/88). BUT a thin
+# market still earning our target (>=GOOD_RATE $/min) is KEPT — abandon needs BOTH thin AND
+# not-paying. Unlike the no-fill timeout (needs ZERO fills) and the flat-only switch, this
+# fires while we're HOLDING a slow-bleeding position — the thin-grind "losing battle".
+THIN_WINDOW_S = 180  # trailing window over which realized fills/min is measured
+THIN_FPM_FLOOR = 3.0  # below this many fills/min (after warmup) -> too thin; abandon
+THIN_WARMUP_S = 120  # give a fresh market this long to show flow before judging it thin
 # CHASE FLOW: while quoting, periodically scan for a more active market and switch to it
 # — but ONLY while flat (so leaving costs no flatten + no half-captured spread). The
 # activity bar is PERFORMANCE-AWARE: because we only switch while flat, our P&L then ≈
@@ -73,7 +85,7 @@ NO_FILL_TIMEOUT_S = 240  # no fills this long -> leave the (illiquid/dud) market
 # give up queue position); if we're flat/bleeding we get EAGER (leave for a modest edge).
 SWITCH_SCAN_S = 45  # seconds between "is a hotter market available?" scans
 MIN_DWELL_S = 60  # stay in a market at least this long before a switch is allowed
-GOOD_RATE = 0.02  # $/min realized; at/above this the current market is "paying" -> sticky
+GOOD_RATE = 0.01  # $/min realized; at/above this the current market is "paying" -> sticky
 STICKY_FACTOR = 3.0  # while earning, only switch to a candidate >= this x as active
 EAGER_FACTOR = 1.5  # while flat/bleeding, switch to a candidate >= this x as active
 # MIN_MID/MAX_MID (the quote/hold price band) are imported from lp_pilot so entry
@@ -89,7 +101,13 @@ FILL_LOG = "data/lp_fills.csv"  # one row per fill with its markout
 #                      markets, exclude MENTION/SOA props, performance-aware switch bar
 #   2026-06-18-meanrev: TOTAL/SPREAD ONLY (allowlist) — never quote winner/moneyline/match
 #                      or directional props; idle if none active (fix for -$5 overnight ATP)
-CONFIG_VERSION = "2026-06-18-meanrev"
+#   2026-06-21-2x    : same selection, but QUOTE_SIZE 1->2, cap 10->20, kill $5->$10 — the
+#                      2x scale test (compare per-fill capture + markout vs the 1x baseline)
+#   2026-06-22-thin  : + flow-based abandon — leave (flatten+roll) a market only when BOTH
+#                      fills/min < THIN_FPM_FLOOR AND mark-P&L rate < GOOD_RATE (thin AND not
+#                      paying), after warmup, EVEN WHILE HOLDING (fixes the thin-grind "losing
+#                      battle" but keeps thin-but-paying markets). Still 2x size.
+CONFIG_VERSION = "2026-06-22-thin"
 
 
 def _need_auth(client: KalshiClient) -> None:
@@ -268,11 +286,15 @@ def _run_market(
     debug: bool,
     retired: set[str],
     allow_switch: bool,
+    quote_size: int = QUOTE_SIZE,
+    config_tag: str = CONFIG_VERSION,
+    prefixes: tuple[str, ...] | None = None,
 ) -> tuple[str, float, str | None]:
-    """Quote one market until it resolves (dead book), the kill switch trips, a much
-    more active market appears (while we're flat), or the session clock `end` is
-    reached. Flattens + logs on exit. Returns (reason, pnl, next_ticker) where reason
-    in {'dead','kill','extreme','illiquid','switch','time'}; next_ticker is the market
+    """Quote one market until it resolves (dead book), the kill switch trips, the flow
+    dries up (thin/illiquid), a much more active market appears (while we're flat), or
+    the session clock `end` is reached. Flattens + logs on exit. Returns (reason, pnl,
+    next_ticker) where reason in {'dead','kill','extreme','thin','illiquid','switch',
+    'time'}; next_ticker is the market
     to switch into (only when reason=='switch', else None). `retired` is excluded from
     switch candidates; `allow_switch` gates the flow-chasing scan."""
     cancel_all(client, tk)
@@ -284,7 +306,8 @@ def _run_market(
     n_fills = 0
     mid = 0.0
     mids: list[tuple[float, float]] = []  # (wall_ts, mid) — for per-fill markouts
-    fill_log: list[tuple[float, str, float]] = []  # (fill_ts, side, price)
+    pnl_hist: list[tuple[float, float]] = []  # (wall_ts, mark P&L) — for the abandon $/min gate
+    fill_log: list[tuple[float, str, float, float]] = []  # (fill_ts, side, price, count)
     max_abs_inv = 0.0
     pnl_min = 0.0
     pnl_max = 0.0
@@ -320,7 +343,7 @@ def _run_market(
                 inv -= cnt
                 cash += px * cnt
             cash -= float(f.get("fee_cost") or 0.0)  # maker fee ~0; taker fee on flatten
-            fill_log.append((float(f.get("ts") or time.time()), side, px))
+            fill_log.append((float(f.get("ts") or time.time()), side, px, cnt))
             n_fills += 1
             last_fill = time.time()
 
@@ -328,6 +351,7 @@ def _run_market(
     dead_book = False  # set if we exit because the market resolved (book went empty)
     extreme = False  # set if the mid drifts to <10c/>90c (longshot/lock) -> leave + flatten
     illiquid = False  # set if no fills for NO_FILL_TIMEOUT_S (dud market) -> roll on
+    thin = False  # set if realized fills/min < THIN_FPM_FLOOR after warmup -> abandon + roll
     switching = False  # set if we leave (while flat) for a much more active market
     switch_target: str | None = None  # the hotter market to switch into
     try:
@@ -359,6 +383,7 @@ def _run_market(
                 max_abs_inv = max(max_abs_inv, abs(inv))
                 pnl = cash + inv * mid  # realized + open inventory marked to mid
                 pnl_min, pnl_max = min(pnl_min, pnl), max(pnl_max, pnl)
+                pnl_hist.append((time.time(), pnl))
                 print(f"  inv {inv:+.2f}  mid {mid:.2f}  fills {n_fills}  P&L ${pnl:+.2f}")
                 if pnl <= -DAILY_LOSS_LIMIT:  # KILL SWITCH (finally cancels + flattens)
                     print("  KILL SWITCH — stop; flatten on exit.")
@@ -380,6 +405,28 @@ def _run_market(
                     )
                     illiquid = True
                     break
+                # ABANDON THIN-AND-NOT-PAYING: low flow alone isn't enough to leave — a thin
+                # market still earning our target (>=GOOD_RATE $/min, the same bar the switch
+                # uses to stay sticky) is worth keeping. Abandon only when BOTH hold: fills/min
+                # below the floor AND the mark-P&L rate below target. Fires while HOLDING too —
+                # the gap the no-fill timeout (zero fills) and flat-only switch both miss.
+                # flatten+retire+roll is handled by the finally block + live().
+                elapsed = time.time() - start
+                if elapsed >= THIN_WARMUP_S:
+                    win_s = min(elapsed, THIN_WINDOW_S)
+                    cutoff = time.time() - win_s
+                    recent = sum(1 for fts, _, _, _ in fill_log if fts >= cutoff)
+                    fpm = recent / (win_s / 60.0)
+                    pnl_then = next((p for t, p in pnl_hist if t >= cutoff), pnl)
+                    pnl_rate = (pnl - pnl_then) / (win_s / 60.0)  # $/min over the same window
+                    if fpm < THIN_FPM_FLOOR and pnl_rate < GOOD_RATE:
+                        print(
+                            f"  flow {fpm:.1f}/min < {THIN_FPM_FLOOR:.0f} and earning "
+                            f"${pnl_rate:+.3f}/min < ${GOOD_RATE:.2f} target — thin and not "
+                            "paying; leaving (flatten + roll)."
+                        )
+                        thin = True
+                        break
                 # CHASE FLOW: while FLAT (free to leave) and past the min dwell, scan for a
                 # busier market. The bar is performance-aware: sticky if this market is
                 # paying us, eager if we're flat/bleeding (see the constants above).
@@ -392,7 +439,7 @@ def _run_market(
                     rate = (pnl - pnl_last_scan) / max((time.time() - last_scan) / 60.0, 1e-9)
                     factor = STICKY_FACTOR if rate >= GOOD_RATE else EAGER_FACTOR
                     pnl_last_scan, last_scan = pnl, time.time()
-                    cand = better_market(client, tk, retired | {tk}, factor)
+                    cand = better_market(client, tk, retired | {tk}, factor, prefixes)
                     if cand:
                         print(
                             f"  flat, earning ${rate:+.3f}/min here -> need {factor:g}x; "
@@ -415,7 +462,9 @@ def _run_market(
                     quotes.append(("ask", ask_px))
                 for s_side, s_px in quotes:
                     try:
-                        oid = _order_id(place_order(client, tk, s_side, s_px, 1, post_only=True))
+                        oid = _order_id(
+                            place_order(client, tk, s_side, s_px, quote_size, post_only=True)
+                        )
                         if oid:
                             our_orders[oid] = s_side
                     except httpx.HTTPStatusError as exc:
@@ -477,10 +526,12 @@ def _run_market(
                 prev = m
             return prev
 
-        fill_hdr = ["ts_utc", "market", "fill_ts", "side", "price", "mid0", "mid_h", "markout_c"]
+        fill_hdr = [
+            "ts_utc", "market", "fill_ts", "side", "price", "mid0", "mid_h", "markout_c", "count"
+        ]
         marks: list[float] = []
         now_iso = datetime.now(UTC).isoformat(timespec="seconds")
-        for fts, fside, fpx in fill_log:
+        for fts, fside, fpx, fcnt in fill_log:
             m0, mh = _mid_at(fts), _mid_at(fts + MARKOUT_HORIZON_S)
             mk = None
             if m0 is not None and mh is not None:
@@ -498,6 +549,7 @@ def _run_market(
                     "" if m0 is None else f"{m0:.4f}",
                     "" if mh is None else f"{mh:.4f}",
                     "" if mk is None else f"{mk * 100:.3f}",
+                    f"{fcnt:.2f}",
                 ],
             )
         mean_markout_c = (sum(marks) / len(marks) * 100.0) if marks else float("nan")
@@ -520,6 +572,7 @@ def _run_market(
                 "avg_spread_c",
                 "mean_markout_c",
                 "config_version",
+                "quote_size",
             ],
             [
                 now_iso,
@@ -535,7 +588,8 @@ def _run_market(
                 f"{pnl_max:.4f}",
                 f"{spread_sum / n_polls * 100.0 if n_polls else 0.0:.2f}",
                 f"{mean_markout_c:.3f}",
-                CONFIG_VERSION,
+                config_tag,
+                quote_size,
             ],
         )
         print(
@@ -555,6 +609,8 @@ def _run_market(
         if dead_book
         else "extreme"
         if extreme
+        else "thin"
+        if thin
         else "illiquid"
         if illiquid
         else "switch"
@@ -571,11 +627,19 @@ def live(
     poll: float,
     debug: bool = False,
     switch: bool = True,
+    ab: bool = False,
+    prefixes: tuple[str, ...] | None = None,
 ) -> int:
     """Wall-clock session: quote a market, ROLL to a fresh one when it resolves, and
     (if `switch`) jump to a much more active market mid-session whenever we're flat —
     chasing flow toward the edge. A pinned --ticker is run once (no roll, no switch).
-    Per-market kill switch (-$DAILY_LOSS_LIMIT) plus a session-cumulative stop."""
+    Per-market kill switch (-$DAILY_LOSS_LIMIT) plus a session-cumulative stop.
+
+    `ab` = the size A/B test: randomly quote 1x or 2x PER MARKET (50/50), tagged
+    config '<version>-ab' with the size logged per session, so 1x vs 2x can be
+    compared on the SAME days/markets — removing the regime confound that makes the
+    across-days 1x-vs-2x comparison uninterpretable. The position cap isn't scaled per
+    arm because it never binds (inventory sits ~2-3 of 20)."""
     _need_auth(client)
     allow_switch = switch and ticker is None  # pinned market is never switched away from
     end = time.time() + minutes * 60
@@ -585,24 +649,33 @@ def live(
         if allow_switch
         else ""
     )
+    universe = ",".join(prefixes) if prefixes else "all benign sports"
     print(
         f"LIVE session: cap +/-{MAX_POSITION}, kill -${DAILY_LOSS_LIMIT:.0f}/mkt + session, "
-        f"{minutes:.0f} min wall-clock — rolls on resolve{sw}."
+        f"{minutes:.0f} min wall-clock — rolls on resolve{sw}. Universe: {universe}."
     )
     retired: set[str] = set()
     pending: str | None = None  # a switch target to go to next (skips re-selection)
     session_pnl = 0.0
     n_markets = 0
     while time.time() < end:
-        tk = ticker or pending or pick_smooth_ticker(client, exclude=retired)
+        tk = ticker or pending or pick_smooth_ticker(client, exclude=retired, prefixes=prefixes)
         pending = None
         if not tk:
             print("  no fresh active market right now; waiting 15s ...")
             time.sleep(15)
             continue
         n_markets += 1
-        print(f"\n=== market {n_markets}: {tk}  ({(end - time.time()) / 60:.0f} min left) ===")
-        reason, pnl, nxt = _run_market(client, tk, end, poll, debug, retired, allow_switch)
+        size = random.choice([1, 2]) if ab else QUOTE_SIZE
+        tag = f"{CONFIG_VERSION}-ab" if ab else CONFIG_VERSION
+        ab_note = f" [AB {size}x]" if ab else ""
+        print(
+            f"\n=== market {n_markets}: {tk}  "
+            f"({(end - time.time()) / 60:.0f} min left){ab_note} ==="
+        )
+        reason, pnl, nxt = _run_market(
+            client, tk, end, poll, debug, retired, allow_switch, size, tag, prefixes
+        )
         session_pnl += pnl
         if reason == "switch":
             pending = nxt  # go straight to the hotter market; don't retire this one
@@ -634,6 +707,17 @@ def main() -> int:
         action="store_true",
         help="disable mid-session switching to busier markets (stay until each resolves)",
     )
+    ap.add_argument(
+        "--ab",
+        action="store_true",
+        help="A/B size test: randomize 1x/2x quote size per market (logs quote_size, tag '-ab')",
+    )
+    ap.add_argument(
+        "--prefix",
+        default=None,
+        help="restrict to ticker prefix(es), comma-separated. Use KXWC for World-Cup-only "
+        "(the only consistently profitable cell; basketball/baseball are toxic). e.g. KXWC",
+    )
     args = ap.parse_args()
 
     load_dotenv()  # pick up KALSHI_API_BASE/KEY_ID + the inline key from .env
@@ -660,8 +744,10 @@ def main() -> int:
             if not args.i_understand_live:
                 print("Refusing --live without --i-understand-live (real money).", file=sys.stderr)
                 return 2
+            prefixes = tuple(p.strip() for p in args.prefix.split(",")) if args.prefix else None
             return live(
-                client, args.ticker, args.minutes, args.poll, args.debug, switch=not args.no_switch
+                client, args.ticker, args.minutes, args.poll, args.debug,
+                switch=not args.no_switch, ab=args.ab, prefixes=prefixes,
             )
         print("Pick a mode: --auth-check | --test-order | --live --i-understand-live")
         return 1

@@ -38,8 +38,8 @@ from ml.lp_gate import passes_gate
 
 POLL_SECONDS = 4.0
 MARKOUT_HORIZONS = (15, 30, 60)  # seconds
-MAX_POSITION = 10  # contracts, +/- (the ultra-small live cap)
-DAILY_LOSS_LIMIT = 5.0  # dollars; kill switch (per-market AND session-cumulative)
+MAX_POSITION = 20  # contracts, +/- (was 10; doubled with QUOTE_SIZE=2 for the 2x scale test)
+DAILY_LOSS_LIMIT = 10.0  # dollars; kill switch per-market AND session (was 5; 2x with size)
 # Quote/hold a market only while its mid is in [MIN_MID, MAX_MID]. Used by BOTH
 # pick_smooth_ticker (entry) and lp_live._run_market (the "extreme" exit).
 # UPPER CAP REINSTATED 0.92 (2026-06-18): the no-cap experiment showed its cost — gated
@@ -135,9 +135,16 @@ def is_mean_reverting(ticker: str) -> bool:
     return any(t in ticker for t in MEAN_REVERTING_TYPES)
 
 
-def pick_smooth_ticker(client: KalshiClient, exclude: set[str] | None = None) -> str | None:
+def pick_smooth_ticker(
+    client: KalshiClient,
+    exclude: set[str] | None = None,
+    prefixes: tuple[str, ...] | None = None,
+) -> str | None:
     """Most active benign, NON-jumpy, gate-eligible, MEAN-REVERTING market with a makeable
-    2-15c spread. ``exclude`` skips already-used/retired tickers (for rolling).
+    2-15c spread. ``exclude`` skips already-used/retired tickers (for rolling). ``prefixes``
+    restricts the eligible ticker prefixes (default BENIGN_PREFIXES); pass e.g. ("KXWC",) to
+    quote World-Cup-only — the structural finding that soccer's rare-discrete scoring is the
+    only consistently benign cell (basketball/baseball continuous scoring -> toxic).
 
     The SELECTION GATE (``ml.lp_gate.passes_gate``) drops structurally-toxic types (ITF)
     and books below the recent-trade floor. On top of that we quote ONLY mean-reverting
@@ -146,13 +153,14 @@ def pick_smooth_ticker(client: KalshiClient, exclude: set[str] | None = None) ->
     None and the caller IDLES rather than bleeding into pick-off books. The 2026-06-18
     overnight lost -$5 doing exactly that (68/84 markets were trending ATP)."""
     skip = exclude or set()
+    pfx = prefixes or BENIGN_PREFIXES
     trades = client.get("/markets/trades", params={"limit": 1000}).get("trades", [])
     counts: Counter[str] = Counter()
     for t in trades:
         tk = t.get("ticker", "")
         if tk in skip or any(x in tk for x in EXCLUDE) or any(j in tk for j in JUMPY):
             continue
-        if any(tk.startswith(p) for p in BENIGN_PREFIXES):
+        if any(tk.startswith(p) for p in pfx):
             counts[tk] += 1
     for tk, recent in counts.most_common(25):
         if not passes_gate(tk, recent):  # toxic type OR book too thin to make in
@@ -170,21 +178,28 @@ def pick_smooth_ticker(client: KalshiClient, exclude: set[str] | None = None) ->
 
 
 def better_market(
-    client: KalshiClient, current: str, exclude: set[str], factor: float
+    client: KalshiClient,
+    current: str,
+    exclude: set[str],
+    factor: float,
+    prefixes: tuple[str, ...] | None = None,
 ) -> str | None:
     """The most-active gate-eligible, MEAN-REVERTING market right now that is at least
     `factor`x more active than `current` (by recent-trade count), else None. Pure activity
     scan — NO orderbook calls — so it's cheap to run inside the quoting loop to chase flow.
-    `exclude` skips retired/forbidden tickers (pass `current` too). Trending winner/moneyline
-    markets are skipped so the switch can't yank us INTO the pick-off books that selection
-    avoids. Returns None if nothing qualifies, so the caller stays put (protects queue)."""
+    `exclude` skips retired/forbidden tickers (pass `current` too). `prefixes` restricts the
+    eligible prefixes (default BENIGN_PREFIXES; pass ("KXWC",) for World-Cup-only) so the
+    switch stays inside the same universe as selection. Trending winner/moneyline markets are
+    skipped so the switch can't yank us INTO the pick-off books selection avoids. Returns None
+    if nothing qualifies, so the caller stays put (protects queue)."""
+    pfx = prefixes or BENIGN_PREFIXES
     trades = client.get("/markets/trades", params={"limit": 1000}).get("trades", [])
     counts: Counter[str] = Counter()
     for t in trades:
         tk = t.get("ticker", "")
         if any(x in tk for x in EXCLUDE) or any(j in tk for j in JUMPY):
             continue
-        if any(tk.startswith(p) for p in BENIGN_PREFIXES):
+        if any(tk.startswith(p) for p in pfx):
             counts[tk] += 1
     cur = counts.get(current, 0)
     for tk, c in counts.most_common():  # descending — first eligible = most active alt
