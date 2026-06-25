@@ -137,6 +137,21 @@ class KalshiClient:
             "Content-Type": "application/json",
         }
 
+    def ws_handshake(self) -> tuple[str, dict[str, str]]:
+        """(ws_url, signed handshake headers) for the WebSocket API. Reuses the same
+        RSA-PSS signer as REST (signs ``ts + "GET" + "/trade-api/ws/v2"``). The WS feed
+        requires auth even for market data, so a signing key MUST be loaded. The WS host
+        is the REST host with the ``-ws`` suffix and the ``/ws/`` path segment."""
+        if self._key is None:
+            raise RuntimeError("WebSocket requires authentication — load a signing key")
+        ws_url = (
+            self.api_base.replace("https://", "wss://")
+            .replace("http://", "ws://")
+            .replace("external-api.", "external-api-ws.")
+            .replace("/trade-api/v2", "/trade-api/ws/v2")
+        )
+        return ws_url, self._signed_headers("GET", ws_url)
+
     # --- transport ---------------------------------------------------------
     def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Signed/public GET with retry + backoff on 429/5xx. ``path`` starts with ``/``."""
