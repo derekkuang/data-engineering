@@ -1,0 +1,74 @@
+version: 2
+
+sources:
+  - name: lp
+    description: >
+      Raw logs from the live LP market-making bot (ml/lp_live.py), landed in the S3
+      raw zone by ingestion/lp_storage.py and exposed via Glue external tables with
+      partition projection on dt. One file per dt, overwritten on re-run (idempotent).
+      See docs/setup/07-lp-pipeline.md for the CREATE EXTERNAL TABLE DDL.
+    database: awsdatacatalog   # Athena catalog
+    schema: crypto_raw         # Glue database holding the external tables
+    tables:
+      - name: lp_sessions
+        description: >
+          One row per market-session the bot quoted: realized P&L split into
+          spread capture (net_cash) vs settlement residual (kalshi_gross - net_cash),
+          fee, inventory peak, average spread, and the fill-weighted markout.
+        columns:
+          - name: session_at
+            description: "Market-session start (UTC). Join key to lp_fills."
+          - name: market_ticker
+            description: "Kalshi market quoted, e.g. KXWCSPREAD-26JUN21TUNJPN-JPN2."
+          - name: minutes
+            description: "Wall-clock minutes the bot quoted this market."
+          - name: n_fills
+            description: "Fills in the session."
+          - name: fills_per_min
+            description: "Activity proxy = n_fills / minutes."
+          - name: net_cash
+            description: "Realized cash from own fills = SPREAD CAPTURE (the repeatable edge)."
+          - name: kalshi_gross
+            description: "Kalshi's authoritative realized P&L, incl. residual settlement."
+          - name: fees
+            description: "Maker fees (≈0 on Kalshi)."
+          - name: max_abs_inv
+            description: "Peak |inventory| (contracts) during the session."
+          - name: pnl_min
+            description: "Minimum mark-to-mid P&L touched during the session."
+          - name: pnl_max
+            description: "Maximum mark-to-mid P&L touched during the session."
+          - name: avg_spread_c
+            description: "Average market bid-ask spread (cents) while quoting."
+          - name: mean_markout_c
+            description: "Fill-weighted markout (cents); <0 = adverse selection."
+          - name: config_version
+            description: "Strategy ruleset tag the session ran under."
+          - name: ingested_at
+            description: "Wall-clock UTC time ingestion wrote this row."
+          - name: dt
+            description: "Partition key (YYYY-MM-DD) from the S3 path = UTC date of session_at."
+      - name: lp_fills
+        description: >
+          One row per fill the bot got, with the realized markout over a fixed horizon.
+        columns:
+          - name: session_at
+            description: "Session start (UTC). Joins to lp_sessions on (session_at, market_ticker)."
+          - name: market_ticker
+            description: "Kalshi market the fill was in."
+          - name: fill_at
+            description: "Exchange fill time (UTC)."
+          - name: book_side
+            description: "Side we were resting: bid (we bought) / ask (we sold)."
+          - name: price
+            description: "Fill price (dollars, 0..1)."
+          - name: mid_at_fill
+            description: "Book mid at fill time."
+          - name: mid_after
+            description: "Book mid at fill + markout horizon."
+          - name: markout_c
+            description: "Maker markout (cents) = signed (mid_after - mid_at_fill); <0 = picked off."
+          - name: ingested_at
+            description: "Wall-clock UTC time ingestion wrote this row."
+          - name: dt
+            description: "Partition key (YYYY-MM-DD) from the S3 path = UTC date of session_at."

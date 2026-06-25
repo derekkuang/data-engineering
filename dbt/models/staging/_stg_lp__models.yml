@@ -1,0 +1,56 @@
+version: 2
+
+models:
+  - name: stg_lp_sessions
+    description: >
+      Cleaned per-market-session LP bot log: one row per (session_at, market_ticker),
+      with the P&L fields, average spread, and markout. A view over the raw external table.
+    columns:
+      - name: session_at
+        description: "Market-session start (UTC)."
+        tests:
+          - not_null
+      - name: market_ticker
+        description: "Kalshi market quoted."
+        tests:
+          - not_null
+      - name: net_cash
+        description: "Spread capture (the repeatable edge)."
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - session_at
+              - market_ticker
+
+  - name: stg_lp_fills
+    description: >
+      Cleaned per-fill LP bot log with the realized markout. A view over the raw table.
+    columns:
+      - name: session_at
+        description: "Session start (UTC); joins to stg_lp_sessions."
+        tests:
+          - not_null
+      - name: market_ticker
+        description: "Kalshi market the fill was in."
+        tests:
+          - not_null
+      - name: fill_at
+        description: "Exchange fill time (UTC)."
+        tests:
+          - not_null
+      - name: price
+        description: "Fill price (dollars, 0..1)."
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: book_side
+        description: "bid / ask."
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['bid', 'ask']

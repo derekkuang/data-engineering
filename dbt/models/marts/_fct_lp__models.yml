@@ -1,0 +1,57 @@
+version: 2
+
+models:
+  - name: fct_lp_market_session
+    description: >
+      Per-market-session fact enriched with ET trading day, sport, market type, and the
+      net = capture + residual - fees decomposition. The backbone for by-sport / by-type /
+      by-config analysis of the LP bot's edge.
+    columns:
+      - name: session_at
+        description: "Market-session start (UTC)."
+        tests:
+          - not_null
+      - name: et_day
+        description: "ET calendar day of the session = the analysis unit."
+        tests:
+          - not_null
+      - name: market_ticker
+        tests:
+          - not_null
+      - name: sport
+        description: "WC / MLB / WNBA / NCAA / ATP / ITF / ... / OTHER."
+        tests:
+          - not_null
+      - name: market_type
+        description: "TOTAL / SPREAD (the allowlist) / MATCH / WINNER / ... / OTHER."
+        tests:
+          - not_null
+      - name: spread_capture
+        description: "net_cash = the repeatable spread-capture edge."
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - session_at
+              - market_ticker
+
+  - name: fct_lp_daily
+    description: >
+      One row per ET trading day: net P&L, the capture/residual split, fill volume, the
+      fill-weighted markout (toxicity), and per-fill capture. The OOS tally as a model.
+    columns:
+      - name: et_day
+        description: "ET trading day."
+        tests:
+          - not_null
+          - unique
+      - name: net_pnl
+        description: "Realized P&L net of fees for the day."
+        tests:
+          - not_null
+      - name: spread_capture
+        description: "Day's spread capture (repeatable edge)."
+        tests:
+          - not_null
