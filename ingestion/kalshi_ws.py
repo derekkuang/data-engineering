@@ -106,8 +106,12 @@ class KalshiWS:
     def __init__(self, client: KalshiClient) -> None:
         self.client = client
         self.books: dict[str, LocalBook] = {}
+        self.trade_counts: dict[str, int] = {}  # market_ticker -> public trades seen
         self._ws: Any = None
         self._gaps = 0
+        self._sids: dict[str, int] = {}  # channel -> subscription id (for update_subscription)
+        self._seq_by_sid: dict[int, int] = {}  # sid -> last seq; gaps are per-STREAM not per-mkt
+        self._next_id = 2  # the initial subscribe uses id=1
 
     async def connect(self) -> None:
         url, headers = self.client.ws_handshake()
@@ -121,21 +125,39 @@ class KalshiWS:
             "params": {"channels": list(channels), "market_tickers": tickers},
         }))
 
+    async def update_subscription(self, channel: str, tickers: list[str], action: str) -> None:
+        """Add/remove markets on an existing subscription WITHOUT reconnecting (the dynamic
+        roll as games start/end). `action` is 'add_markets' or 'delete_markets'."""
+        sid = self._sids.get(channel)
+        if sid is None or not tickers:
+            return
+        self._next_id += 1
+        await self._ws.send(json.dumps({
+            "id": self._next_id, "cmd": "update_subscription",
+            "params": {"sids": [sid], "market_tickers": tickers, "action": action},
+        }))
+
     def _handle(self, m: dict[str, Any]) -> None:
         t = m.get("type")
-        if t not in ("orderbook_snapshot", "orderbook_delta"):
+        if t == "subscribed":  # capture the sid per channel so we can update_subscription later
+            sub = m.get("msg", {})
+            self._sids[sub.get("channel")] = sub.get("sid")
             return
+        sid, seq = m.get("sid"), m.get("seq")
+        if sid is not None and seq is not None:  # gap detection is PER STREAM (sid), not per market
+            wm = self._seq_by_sid.get(sid)
+            if wm is not None and seq != wm + 1:
+                self._gaps += 1
+                logger.warning("seq gap on sid %s: expected %d got %d", sid, wm + 1, seq)
+            self._seq_by_sid[sid] = seq
         msg = m.get("msg", {})
         ticker = msg.get("market_ticker")
-        seq = int(m.get("seq", 0))
-        book = self.books.setdefault(ticker, LocalBook())
         if t == "orderbook_snapshot":
-            book.apply_snapshot(msg, seq)
-        else:
-            if seq != book.seq + 1:  # gap → local book is now unreliable for this stream
-                self._gaps += 1
-                logger.warning("seq gap on %s: expected %d got %d", ticker, book.seq + 1, seq)
-            book.apply_delta(msg, seq)
+            self.books.setdefault(ticker, LocalBook()).apply_snapshot(msg, int(seq or 0))
+        elif t == "orderbook_delta":
+            self.books.setdefault(ticker, LocalBook()).apply_delta(msg, int(seq or 0))
+        elif t == "trade":
+            self.trade_counts[ticker] = self.trade_counts.get(ticker, 0) + 1
 
     async def run(self) -> None:
         async for raw in self._ws:

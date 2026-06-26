@@ -52,16 +52,23 @@ def test_rest_top_of_book_cents_and_dollars() -> None:
     ) == (0.50, 0.52)
 
 
-def test_seq_gap_detection() -> None:
+def test_seq_gap_detection_per_stream() -> None:
     ws = KalshiWS(client=cast(KalshiClient, None))  # _handle doesn't touch the client
+    # gaps are tracked per STREAM (sid), since one subscription interleaves many markets
     snap: dict[str, Any] = {
-        "type": "orderbook_snapshot", "seq": 1,
+        "type": "orderbook_snapshot", "sid": 1, "seq": 1,
         "msg": {"market_ticker": "X", "yes_dollars_fp": [["0.50", "10"]], "no_dollars_fp": []},
     }
     ws._handle(snap)
     d2 = {"market_ticker": "X", "side": "yes", "price_dollars": "0.50", "delta_fp": "5"}
-    ws._handle({"type": "orderbook_delta", "seq": 2, "msg": d2})
-    assert ws._gaps == 0  # in-order
-    d5 = {"market_ticker": "X", "side": "yes", "price_dollars": "0.50", "delta_fp": "1"}
-    ws._handle({"type": "orderbook_delta", "seq": 5, "msg": d5})  # gap: expected 3
+    ws._handle({"type": "orderbook_delta", "sid": 1, "seq": 2, "msg": d2})
+    assert ws._gaps == 0  # in-order on the stream
+    d5 = {"market_ticker": "Y", "side": "yes", "price_dollars": "0.50", "delta_fp": "1"}
+    ws._handle({"type": "orderbook_delta", "sid": 1, "seq": 5, "msg": d5})  # stream gap: expected 3
     assert ws._gaps == 1
+
+
+def test_subscribed_ack_captures_sid() -> None:
+    ws = KalshiWS(client=cast(KalshiClient, None))
+    ws._handle({"type": "subscribed", "msg": {"channel": "orderbook_delta", "sid": 7}})
+    assert ws._sids["orderbook_delta"] == 7
