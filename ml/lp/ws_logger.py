@@ -22,8 +22,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
+import csv
 import time
 from collections import Counter
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -33,6 +38,23 @@ from ml.lp.lp_gate import passes_gate
 from ml.lp.lp_pilot import BENIGN_PREFIXES, EXCLUDE, JUMPY, is_mean_reverting
 
 CHANNELS = ("orderbook_delta", "trade")
+BOOK_LOG = "data/ws_book.csv"
+TRADE_LOG = "data/ws_trades.csv"
+BOOK_HDR = ["ts_utc", "market", "bid", "ask", "mid", "spread_c"]
+TRADE_HDR = ["ts_utc", "market", "trade_id", "price", "count", "taker_side", "trade_ts"]
+
+
+def _append(path: str, header: list[str], rows: list[list[Any]]) -> None:
+    if not rows:
+        return
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    new = not p.exists()
+    with p.open("a", newline="") as fh:
+        w = csv.writer(fh)
+        if new:
+            w.writerow(header)
+        w.writerows(rows)
 
 
 def discover_markets(
@@ -78,27 +100,43 @@ async def run(
         return 0
 
     ws = KalshiWS(client)
-    await ws.connect()
-    await ws.subscribe(current, CHANNELS)
-    pump = asyncio.create_task(ws.run())
+    ws.set_subscription(current, CHANNELS)
+    pump = asyncio.create_task(ws.run_forever())  # resilient: auto-reconnect + resubscribe
     print(f"subscribed {len(current)} markets on 1 connection ({','.join(CHANNELS)}); "
-          f"{minutes:.0f} min, reconcile every {reconcile_s:g}s\n")
+          f"{minutes:.0f} min -> {BOOK_LOG} + {TRADE_LOG}\n")
 
     end = time.time() + minutes * 60
     last_refresh = time.time()
+    n_book = n_trade = 0
     try:
         while time.time() < end:
             await asyncio.sleep(reconcile_s)
+            now_iso = datetime.now(UTC).isoformat(timespec="seconds")
+            # log trades (complete, drained) + a top-of-book sample per market
+            trade_rows = [
+                [now_iso, t.get("market_ticker"), t.get("trade_id"), t.get("yes_price_dollars"),
+                 t.get("count_fp"), t.get("taker_side"), t.get("ts_ms")]
+                for t in ws.drain_trades()
+            ]
+            book_rows: list[list[Any]] = []
+            for tk, bk in ws.books.items():
+                bid, ask = bk.top_of_book()
+                if bid is not None and ask is not None:
+                    book_rows.append([now_iso, tk, f"{bid:.4f}", f"{ask:.4f}",
+                                      f"{(bid + ask) / 2:.4f}", f"{(ask - bid) * 100:.2f}"])
+            _append(TRADE_LOG, TRADE_HDR, trade_rows)
+            _append(BOOK_LOG, BOOK_HDR, book_rows)
+            n_trade += len(trade_rows)
+            n_book += len(book_rows)
             # reconcile a sample of books vs fresh REST snapshots (correctness at scale)
             sample = [tk for tk in current if tk in ws.books][:5]
-            matches = 0
-            for tk in sample:
-                ws_tob = ws.books[tk].top_of_book()
-                rest_tob = rest_top_of_book(client.get_market_orderbook(tk))
-                matches += ws_tob == rest_tob
-            trades = sum(ws.trade_counts.values())
-            print(f"  [{time.strftime('%H:%M:%S')}] subscribed {len(current)} books {len(ws.books)}"
-                  f" trades {trades} seq-gaps {ws._gaps} reconcile {matches}/{len(sample)}")
+            matches = sum(
+                ws.books[tk].top_of_book() == rest_top_of_book(client.get_market_orderbook(tk))
+                for tk in sample
+            )
+            print(f"  [{time.strftime('%H:%M:%S')}] books {len(ws.books)} "
+                  f"trades {sum(ws.trade_counts.values())} seq-gaps {ws._gaps} "
+                  f"reconnects {ws._reconnects} reconcile {matches}/{len(sample)}")
             # dynamic roll (discovery mode only): add new active markets, drop gone ones
             if not fixed and time.time() - last_refresh >= refresh_s:
                 new = discover_markets(client, prefixes, cap)
@@ -115,11 +153,13 @@ async def run(
                 current = new
                 last_refresh = time.time()
     finally:
+        await ws.close()  # sets _stop -> run_forever exits its reconnect loop
         pump.cancel()
-        await ws.close()
+        with contextlib.suppress(asyncio.CancelledError):
+            await pump
         client.close()
-    print(f"\nDONE: {len(ws.books)} books built, {sum(ws.trade_counts.values())} trades, "
-          f"{ws._gaps} seq gaps.")
+    print(f"\nDONE: {n_book} book ticks + {n_trade} trades logged, "
+          f"{ws._gaps} seq gaps, {ws._reconnects} reconnects.")
     return 0
 
 

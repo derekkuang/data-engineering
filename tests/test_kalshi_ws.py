@@ -72,3 +72,24 @@ def test_subscribed_ack_captures_sid() -> None:
     ws = KalshiWS(client=cast(KalshiClient, None))
     ws._handle({"type": "subscribed", "msg": {"channel": "orderbook_delta", "sid": 7}})
     assert ws._sids["orderbook_delta"] == 7
+
+
+def test_trade_buffer_count_and_drain() -> None:
+    ws = KalshiWS(client=cast(KalshiClient, None))
+    tr = {"market_ticker": "X", "trade_id": "t1", "taker_side": "yes"}
+    ws._handle({"type": "trade", "sid": 2, "seq": 1, "msg": tr})
+    ws._handle({"type": "trade", "sid": 2, "seq": 2, "msg": {**tr, "trade_id": "t2"}})
+    assert ws.trade_counts["X"] == 2
+    drained = ws.drain_trades()
+    assert [d["trade_id"] for d in drained] == ["t1", "t2"]
+    assert ws.drain_trades() == []  # buffer cleared
+
+
+def test_update_subscription_syncs_desired_set() -> None:
+    ws = KalshiWS(client=cast(KalshiClient, None))
+    ws.set_subscription(["A", "B"], ("orderbook_delta",))
+    # no live socket -> send is skipped, but the desired set must still update for reconnect
+    import asyncio
+    asyncio.run(ws.update_subscription("orderbook_delta", ["C"], "add_markets"))
+    asyncio.run(ws.update_subscription("orderbook_delta", ["A"], "delete_markets"))
+    assert ws._tickers == ["B", "C"]

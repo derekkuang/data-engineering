@@ -107,27 +107,46 @@ class KalshiWS:
         self.client = client
         self.books: dict[str, LocalBook] = {}
         self.trade_counts: dict[str, int] = {}  # market_ticker -> public trades seen
+        self.trades: list[dict[str, Any]] = []  # buffer of trade msgs, drained by the logger
         self._ws: Any = None
         self._gaps = 0
+        self._reconnects = 0
         self._sids: dict[str, int] = {}  # channel -> subscription id (for update_subscription)
         self._seq_by_sid: dict[int, int] = {}  # sid -> last seq; gaps are per-STREAM not per-mkt
         self._next_id = 2  # the initial subscribe uses id=1
+        self._tickers: list[str] = []  # desired subscription (resubscribed on reconnect)
+        self._channels: tuple[str, ...] = ("orderbook_delta",)
+        self._stop = False
+        self._resync_pending = False
 
     async def connect(self) -> None:
         url, headers = self.client.ws_handshake()
-        self._ws = await websockets.connect(url, additional_headers=headers)
+        # built-in ping keepalive detects dead connections; run_forever reconnects on close
+        self._ws = await websockets.connect(
+            url, additional_headers=headers, ping_interval=20, ping_timeout=20
+        )
+
+    def set_subscription(self, tickers: list[str], channels: tuple[str, ...]) -> None:
+        """Set the DESIRED subscription; run_forever (re)subscribes to it on every connect."""
+        self._tickers = list(tickers)
+        self._channels = tuple(channels)
 
     async def subscribe(
         self, tickers: list[str], channels: tuple[str, ...] = ("orderbook_delta",)
     ) -> None:
+        self.set_subscription(tickers, channels)
         await self._ws.send(json.dumps({
             "id": 1, "cmd": "subscribe",
             "params": {"channels": list(channels), "market_tickers": tickers},
         }))
 
     async def update_subscription(self, channel: str, tickers: list[str], action: str) -> None:
-        """Add/remove markets on an existing subscription WITHOUT reconnecting (the dynamic
-        roll as games start/end). `action` is 'add_markets' or 'delete_markets'."""
+        """Add/remove markets (or get_snapshot) on an existing subscription WITHOUT
+        reconnecting. add/delete also update the desired set so a reconnect resubscribes it."""
+        if action == "add_markets":
+            self._tickers += [t for t in tickers if t not in self._tickers]
+        elif action == "delete_markets":
+            self._tickers = [t for t in self._tickers if t not in tickers]
         sid = self._sids.get(channel)
         if sid is None or not tickers:
             return
@@ -136,6 +155,23 @@ class KalshiWS:
             "id": self._next_id, "cmd": "update_subscription",
             "params": {"sids": [sid], "market_tickers": tickers, "action": action},
         }))
+
+    def _schedule_resync(self) -> None:
+        """On a seq gap the local books may have missed deltas → re-request fresh snapshots
+        (get_snapshot, no teardown), debounced to coalesce a burst of gaps."""
+        if self._resync_pending or not self._tickers:
+            return
+        self._resync_pending = True
+        asyncio.create_task(self._resync())
+
+    async def _resync(self) -> None:
+        try:
+            await asyncio.sleep(0.5)  # coalesce
+            await self.update_subscription("orderbook_delta", list(self._tickers), "get_snapshot")
+        except Exception as exc:  # connection may be mid-drop; the reconnect path will resync
+            logger.warning("resync failed: %s", str(exc)[:80])
+        finally:
+            self._resync_pending = False
 
     def _handle(self, m: dict[str, Any]) -> None:
         t = m.get("type")
@@ -149,6 +185,7 @@ class KalshiWS:
             if wm is not None and seq != wm + 1:
                 self._gaps += 1
                 logger.warning("seq gap on sid %s: expected %d got %d", sid, wm + 1, seq)
+                self._schedule_resync()
             self._seq_by_sid[sid] = seq
         msg = m.get("msg", {})
         ticker = msg.get("market_ticker")
@@ -158,12 +195,46 @@ class KalshiWS:
             self.books.setdefault(ticker, LocalBook()).apply_delta(msg, int(seq or 0))
         elif t == "trade":
             self.trade_counts[ticker] = self.trade_counts.get(ticker, 0) + 1
+            self.trades.append(msg)
+
+    def drain_trades(self) -> list[dict[str, Any]]:
+        """Return and clear the buffered trade messages (the logger persists them)."""
+        out, self.trades = self.trades, []
+        return out
 
     async def run(self) -> None:
+        """Single-connection recv loop (used by the Phase-2 self-check)."""
         async for raw in self._ws:
             self._handle(json.loads(raw))
 
+    async def run_forever(self) -> None:
+        """Resilient recv loop: (re)connect, resubscribe the desired set + resnapshot, and
+        reconnect with exponential backoff on any drop. Reset per-stream seq state each time."""
+        backoff = 1.0
+        while not self._stop:
+            try:
+                await self.connect()
+                self._sids.clear()
+                self._seq_by_sid.clear()
+                self._resync_pending = False
+                await self.subscribe(self._tickers, self._channels)
+                backoff = 1.0
+                async for raw in self._ws:
+                    self._handle(json.loads(raw))
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # connection dropped / handshake failed
+                if self._stop:
+                    break
+                logger.warning("WS dropped (%s); reconnect in %.0fs", str(exc)[:80], backoff)
+            if self._stop:
+                break
+            self._reconnects += 1
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 30.0)
+
     async def close(self) -> None:
+        self._stop = True  # stop run_forever's reconnect loop
         if self._ws is not None:
             await self._ws.close()
 
