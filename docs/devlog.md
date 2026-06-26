@@ -4,6 +4,46 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-06-17 → 06-26 — CHECKPOINT: the project became a live Kalshi market-making operation + its data platform (WebSocket multi-market infra built; edge confirmed soccer-structural, not yet net-proven)
+
+Consolidated checkpoint over ~10 days (per-track detail is in the memory files; this is the map + resume point).
+
+**Where the project is now.** The original DE platform (crypto ingestion → Athena/dbt PIT store → ML) did its honest job — it proved the predictive BTC-15m edge doesn't exist net of cost (~10 null axes). The project then pivoted to its real centre: a **live Kalshi market-making bot (real money) and the data platform around it**. The trading bot *is* the data-engineering project now ("finding edge on Kalshi").
+
+**The trading edge — what we learned.**
+- *Strategy:* two-sided liquidity provision on Kalshi in-play sports TOTAL/SPREAD markets — capture the bid-ask spread; needs mean-reversion + wide retail spreads + maker-free fills.
+- *9-day record (current strategy):* net +$70, spread-capture +$61, **+0.59c/fill**, markout −0.24c, net-positive 7/9 days — BUT capture went **negative the last 2 days** (06-24 non-WC, 06-25 WC trending 1H-totals).
+- **THE key finding — the edge is SOCCER-STRUCTURAL, not volume.** Per-sport: WC soccer markout −0.10c, positive **9/9** days; WNBA breakeven (4/8); MLB net-negative (3/10). Soccer scores rarely + discretely → totals/spreads mean-revert → benign to make; basketball/baseball score continuously → fair value trends → toxic pick-off. Corroborated by in-play-trading prior art (soccer = the #1 scalp market). So **`--prefix KXWC` (World-Cup-only) shipped**.
+- *Size scaling:* 2× is **not** truly 2× — only ~1.4× real volume (fills are taker-flow-limited), per-fill edge flat, and it amplifies residual variance. **Bigger size = the worst axis.** The real scaling lever is **more markets (concurrency)** → which motivated the WebSocket build.
+- *Confidence:* mechanism real ~70-75%; net-reliable-money **~50% and trending down** (the World Cup — the regime that drove the wins — is ending). So NOW = **confirm** (post-WC days + the `--ab` size test), not scale.
+- *Closed, all null, with data:* tennis (martingale), Polymarket spread (1c) + reward farming (reward covers only 2% of the goal pick-off), Kalshi weather temp markets (maker *pays* 0.44c on a 1c spread into a guaranteed convergence pick-off), cross-venue arb, binary-perp basis. Through-line: every predictive/competed/toxic edge is null; the lone survivor is Kalshi retail-**soccer** MM.
+
+**The data-engineering work (the new-idea direction — the bot as the DE project).**
+- *LP data pipeline (built, parses + lineage green offline, NOT yet run against Athena):* `ingestion/lp_storage.py` lands the bot's session/fill CSVs to S3 raw Parquet → dbt `stg_lp_*` → `fct_lp_market_session` (per-session, enriched with ET-day/sport/type + the net = capture + residual − fees decomposition) → `fct_lp_daily` (the OOS tally as a model). DDL + run sequence in `docs/setup/07-lp-pipeline.md`. Mirrors the coinbase/kalshi medallion. Needs S3 creds + the Glue tables created to run end-to-end.
+- *WebSocket multi-market infra (Phase 0-4, built + committed, read-only):* the scaling unlock. `ingestion/kalshi_ws.py` = async client — `LocalBook` from snapshot+deltas, **per-stream seq-gap detection**, auto-reconnect + `get_snapshot` gap-recovery, trade buffer. `ml/lp/ws_logger.py` = read-only multi-market logger — discover the active set → subscribe many on **one connection** → reconcile each local book vs REST → roll as games start/end → log `data/ws_book.csv` + `data/ws_trades.csv`. Verified live: **0 seq gaps** over thousands of deltas, local book REST-validated. This is the production-grade FEED the live multi-market maker (Phase 5) will reuse.
+- *Codebase cleanup (committed to main):* the flat 34-script `ml/` was reorganized into `ml/alpha/` (closed BTC hunt), `ml/lp/` (active maker), `ml/research/` (closed side-tracks), + `ml/README.md`; all prior uncommitted work committed in logical commits.
+
+**Direction.** Treat the **live Kalshi soccer-MM bot + its data platform** as the project. The edge is real but thin and WC-seasonal, so trading is in CONFIRM mode. The durable portfolio value is the **platform + the honest research arc** — built a platform to hunt edge, proved the easy edges don't exist, found one structural edge, built the infra to scale it — which holds regardless of whether the seasonal edge survives.
+
+**WHAT'S LEFT (resume list).**
+*DE / platform (the new-idea direction):*
+1. **Run the LP pipeline end-to-end** — set `S3_BUCKET` + creds, create the Glue tables (docs/setup/07), `lp_storage` ingest → `dbt build` → `dbt test`. (Built, never run against Athena.)
+2. **WS-data pipeline** — storage + dbt layer for `ws_book.csv`/`ws_trades.csv` (analog of lp_storage) so the multi-market feed feeds the warehouse.
+3. **Per-sport / markout dashboard** — Streamlit over `fct_lp_daily` / `fct_lp_market_session`; turns the structural finding into a legible artifact.
+4. **Toxicity / market-selection model** — predict markout from sport/type/activity/spread (the ML layer of the new DE project; the right target since price-direction is dead).
+5. Wire the new LP CSV columns (`quote_size`, `count`) into `lp_storage` schema + dbt.
+6. **The write-up** — refresh the top-level README to the real arc (still stale at "ML demo").
+7. Push to GitHub (main is local-only, never pushed); delete the `admin` IAM key (hygiene).
+*Trading / edge (gates the live scaling):*
+8. Accumulate **~8-12 clean POST-WC days** → confirm the edge survives the World Cup ending.
+9. Run the **`--ab` size test** (clean same-day 1×-vs-2×) → settle size scaling.
+10. Verify the WS feed at SCALE during a game: `uv run python -m ml.lp.ws_logger --prefix KXWC --minutes 30` (read-only).
+11. **Phase 5 (GATED on #8):** the live async multi-market MAKER — wire `kalshi_ws` into the quoting loop (② faster reaction + ③ more markets). Then **Phase 6:** deploy EC2/Fargate for unattended running.
+
+**Git state.** On branch `ws-multimarket-logger` (3 WS commits ahead of main); `main` has the cleanup/reorg + LP pipeline + bot evolution + closed-track commits. Nothing pushed yet. The WS branch is ready to fast-forward into main when desired.
+
+---
+
 ## 2026-06-16/17 — Liquidity-provision pilot: from screen → paper → LIVE real-money market-making (first ~4.6h, +$5.33 realized, edge unconfirmed)
 
 A separate "can this actually make money" track (the platform's directional/arb alpha is closed — all null). Verdict from research: the easy alpha is competed away; structural money is in **liquidity provision** (get paid the spread + maker rebates). Polymarket US is iOS-only with no public trading API → **Kalshi first** (full API, maker fills free).
