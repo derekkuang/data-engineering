@@ -23,9 +23,27 @@ TOTAL/SPREAD markets.
   by-type / by-config breakdowns.
 - `lp_paper_pilot.py`, `lp_market_screen.py`, `lp_toxicity_screen.py` — earlier paper run
   + the 2-stage opportunity/toxicity screens (history).
+- **`soccer_screen.py`** — does the WC market-making microstructure repeat in year-round club
+  soccer (MLS/Brasileirão/Liga MX/Scandinavia)? Screens near-money TOTAL/SPREAD spread + volume
+  vs the WC benchmark. First read: club near-money spreads ARE in-band (Liga MX widest ~4c); the
+  in-play flow/mean-reversion half still needs a live-game `ws_logger` run to confirm.
 
 The **DE pipeline** for this bot's data lives outside `ml/`:
 `ingestion/lp_storage.py` → `dbt/models/{staging,marts}/*lp*` → `docs/setup/07-lp-pipeline.md`.
+
+## `weather/` — OPEN: Kalshi weather DIRECTIONAL edge hunt + NOAA pipeline
+
+The daily high-temp ladders are WC-scale volume (~1M contracts/day across the big cities).
+*Making* them is dead (the convergence pick-off — see `research/weather_logger.py`); this
+tests *taking*: can a forecast/observation model out-price the buckets by more than spread+fee?
+
+- **`calib_study.py`** (W0) — fetches settled NYC/LAX ladders from the public API, samples the
+  market's implied bucket probabilities at fixed decision times (evening-before → 6pm day-of),
+  and runs the BTC-benchmark calibration harness (log-loss / Brier / ECE / reliability). First
+  read: market is well-calibrated (ECE ~2–4%), with residual miscalibration concentrated in the
+  **morning** window (ECE up to ~6.5%) — where a model edge (H1) would live, if any.
+- Next (W1): `ingestion/noaa.py` + `weather_storage.py` — NOAA/NWS + Open-Meteo → S3 → dbt
+  `fct_weather_pit`; then `edge_study.py` (W2) for the walk-forward, cost-aware verdict.
 
 ## `research/` — CLOSED side-tracks (kept for the narrative; all null/dead)
 

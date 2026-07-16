@@ -62,5 +62,7 @@ module = [
     "sklearn.*",
     "lightgbm",
     "lightgbm.*",
+    "scipy",
+    "scipy.*",
 ]
 ignore_missing_imports = true
