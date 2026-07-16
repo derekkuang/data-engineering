@@ -67,6 +67,9 @@ jobs:
       - name: Ingest Kalshi 15-min markets
         run: uv run python -m ingestion.kalshi_backfill --days "$INGEST_DAYS"
 
+      - name: Snapshot Kalshi market universe
+        run: uv run python -m ingestion.kalshi_universe   # point-in-time 'now' snapshot; no INGEST_DAYS
+
       - name: dbt deps
         working-directory: dbt
         run: uv run dbt deps

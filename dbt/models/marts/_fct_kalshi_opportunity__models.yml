@@ -1,0 +1,41 @@
+version: 2
+
+models:
+  - name: fct_kalshi_opportunity
+    description: >
+      Per-(series, snapshot day) LP opportunity landscape: gross spread-capture $/day
+      (an upper bound, NOT realized P&L), median + near-money median spread, depth, volume,
+      and the fee_type / has_maker_fee flag. Ranked by spread_capture — the stage-1 shortlist
+      of where a maker could earn, before toxicity (that discount lives in the LP fills marts).
+    columns:
+      - name: series_ticker
+        description: "The series, e.g. KXWCSPREAD."
+        tests:
+          - not_null
+      - name: snapshot_day
+        description: "UTC calendar day of the snapshot (aligns with the dt partition)."
+        tests:
+          - not_null
+      - name: spread_capture
+        description: "sum(volume_24h * spread / 2) = GROSS half-spread $/day (upper bound)."
+        tests:
+          - not_null
+      - name: has_maker_fee
+        description: "Boolean: series charges maker fees (Feb-2026 fee schedule)."
+        tests:
+          - accepted_values:
+              arguments:
+                values: [true, false]
+                quote: false
+      - name: median_spread_c
+        description: "Median per-market spread (cents) across the series' markets."
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - series_ticker
+              - snapshot_day

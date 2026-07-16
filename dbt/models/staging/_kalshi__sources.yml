@@ -43,3 +43,47 @@ sources:
             description: "Wall-clock UTC time the ingestion wrote this row."
           - name: dt
             description: "Partition key (YYYY-MM-DD), the window's open date, from the S3 path."
+
+      - name: kalshi_universe
+        description: >
+          Daily point-in-time snapshot of every OPEN Kalshi market with a two-sided quote
+          and real 24h volume (landed by ingestion/kalshi_universe.py). The spread / depth /
+          volume / fee_type landscape the LP-opportunity mart ranks. One row per
+          (market_ticker, snapshot_at); one Parquet per dt (UTC snapshot date), last-write-wins.
+        columns:
+          - name: snapshot_at
+            description: "UTC wall-clock time the universe was captured (grain #1)."
+          - name: market_ticker
+            description: "The open market (grain #2), e.g. KXWCSPREAD-26JUL15ABC-A."
+          - name: event_ticker
+            description: "The market's event."
+          - name: series_ticker
+            description: "The market's series, e.g. KXWCSPREAD."
+          - name: category
+            description: "Kalshi category (Sports, Economics, ...)."
+          - name: status
+            description: "Market status at snapshot (active, ...)."
+          - name: open_time
+            description: "Market open time, UTC (nullable)."
+          - name: close_time
+            description: "Market close time, UTC (nullable)."
+          - name: yes_bid
+            description: "Best YES bid at snapshot (dollars, 0..1)."
+          - name: yes_ask
+            description: "Best YES ask at snapshot (dollars, 0..1)."
+          - name: volume_24h
+            description: "Contracts traded in the last 24h (volume_24h_fp -> volume_fp)."
+          - name: open_interest
+            description: "Open interest (contracts)."
+          - name: liquidity
+            description: "Dollar notional of the resting book (depth proxy)."
+          - name: yes_bid_size
+            description: "Contracts resting at the best YES bid (nullable)."
+          - name: yes_ask_size
+            description: "Contracts resting at the best YES ask (nullable)."
+          - name: fee_type
+            description: "Series fee_type: 'quadratic' (maker-free) or 'quadratic_with_maker_fees'."
+          - name: ingested_at
+            description: "Wall-clock UTC time the ingestion wrote this row."
+          - name: dt
+            description: "Partition key (YYYY-MM-DD) = UTC date of snapshot_at, from the S3 path."

@@ -259,6 +259,23 @@ class KalshiClient:
                 break
         return markets
 
+    def get_series(self, series_ticker: str) -> dict[str, Any]:
+        """Series-level metadata (category, tags, fee_type, settlement sources).
+        ``fee_type`` is 'quadratic' (maker-free) or 'quadratic_with_maker_fees' —
+        the field the universe snapshot needs to flag maker-fee-taxed books."""
+        resp = self.get(f"/series/{series_ticker}")
+        series: dict[str, Any] = resp.get("series", resp)
+        return series
+
+    def list_series(self, category: str | None = None) -> list[dict[str, Any]]:
+        """Every series (optionally one category) in a SINGLE call, each item carrying
+        ``fee_type`` + category + tags. Lets the universe snapshot build the whole
+        fee_type map in one request instead of a per-series fan-out."""
+        params = {"category": category} if category else None
+        resp = self.get("/series", params=params)
+        series: list[dict[str, Any]] = resp.get("series", [])
+        return series
+
     def get_market_candlesticks(
         self, series_ticker: str, ticker: str, start_ts: int, end_ts: int, period_interval: int = 1
     ) -> list[dict[str, Any]]:

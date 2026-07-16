@@ -43,3 +43,41 @@ models:
             combination_of_columns:
               - market_ticker
               - event_at
+
+  - name: stg_kalshi_universe
+    description: >
+      Cleaned universe snapshot: one row per (market_ticker, snapshot_at) for every open
+      market with a two-sided quote + real 24h volume, with derived mid/spread and the
+      near-money / retail-spread-band flags. A view over the raw external table.
+    columns:
+      - name: market_ticker
+        description: "The open market, e.g. KXWCSPREAD-26JUL15ABC-A."
+        tests:
+          - not_null
+      - name: snapshot_at
+        description: "UTC capture time."
+        tests:
+          - not_null
+      - name: series_ticker
+        description: "The market's series."
+        tests:
+          - not_null
+      - name: spread
+        description: "yes_ask - yes_bid = the maker's gross per-round-trip prize (dollars)."
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: is_near_money
+        description: "Boolean: mid in [0.15, 0.85] (a real two-sided quote, not a settled tail)."
+      - name: in_retail_band
+        description: "Boolean: spread in 2-15c (the retail band the soccer MM edge lives in)."
+      - name: has_maker_fee
+        description: "Boolean: series fee_type = 'quadratic_with_maker_fees'."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - market_ticker
+              - snapshot_at
