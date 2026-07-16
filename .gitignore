@@ -29,9 +29,11 @@ dist/
 service-account*.json
 
 # Data files (don't commit raw or processed data)
-data/
+/data/
 *.parquet
 *.csv.gz
+# ...except the dashboard's small public opportunity snapshot, so it deploys self-contained
+!dashboard/data/opportunity_snapshot.parquet
 *.json.gz
 
 # Local run logs (e.g. the order-book collector launchd job)

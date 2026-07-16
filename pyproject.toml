@@ -25,6 +25,10 @@ dev = [
     "mypy>=1.11.0",
     "pytest>=8.0.0",
 ]
+dashboard = [
+    "streamlit>=1.40.0",
+    "plotly>=5.24.0",
+]
 
 [tool.pytest.ini_options]
 # Only the pure-Python unit tests; airflow/tests need the Astro runtime image.
