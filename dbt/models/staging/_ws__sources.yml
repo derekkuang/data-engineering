@@ -1,0 +1,28 @@
+version: 2
+
+sources:
+  - name: ws
+    description: >
+      Read-only WebSocket capture of in-play market microstructure (landed by
+      ingestion/ws_feature_storage.py from ml/lp/ws_features.py). Per market per snapshot:
+      book shape + imbalance, trade flow, and mid vol/drift — the feature store for the
+      toxicity/selection model and the source for the markout label.
+    database: awsdatacatalog   # Athena catalog
+    schema: crypto_raw         # Glue database holding the external table
+    tables:
+      - name: ws_features
+        description: >
+          One row per (market_ticker, snapshot_at): pre-quote microstructure features captured
+          live during games. One Parquet per dt (UTC snapshot date); dt is a partition key in
+          the S3 path, not a column.
+        columns:
+          - name: snapshot_at
+            description: "UTC capture time (grain #1)."
+          - name: market_ticker
+            description: "The market being observed (grain #2)."
+          - name: mid
+            description: "(bid + ask) / 2 at snapshot (dollars, 0..1)."
+          - name: signed_flow_1m
+            description: "Net taker direction over the trailing 1m (contracts); the adverse-selection pressure."
+          - name: dt
+            description: "Partition key (YYYY-MM-DD) = UTC date of snapshot_at, from the S3 path."

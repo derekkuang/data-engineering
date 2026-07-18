@@ -1,0 +1,67 @@
+name: ws in-play capture
+
+# Auto-logger for the toxicity / ML feature store. At game-heavy windows this captures the
+# live in-play microstructure of the active sports board (ml.lp.ws_features — book shape, flow,
+# mid vol/drift, per market every few seconds) and lands it to the S3 raw zone
+# (ingestion.ws_feature_storage). The nightly `scheduled pipeline` then builds stg_ws_features
+# + fct_ws_markout (the markout-labeled table) over it.
+#
+# The schedule is a COARSE fixed net over global game clusters (Europe evening, US afternoon,
+# US evening) — a fixed-cron trade-off vs a standing daemon; tune the crons / add dispatch runs
+# for specific games. GitHub Actions runs scheduled workflows only on the default branch.
+# Read-only: it places no orders and needs no trading key.
+
+on:
+  schedule:
+    - cron: "0 19 * * *"   # ~afternoon Europe / midday US
+    - cron: "0 23 * * *"   # ~evening Europe / afternoon US
+    - cron: "0 2 * * *"    # ~evening US
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "capture minutes"
+        default: "90"
+      prefix:
+        description: "restrict to a series prefix (e.g. KXWC); blank = whole active sports board"
+        default: ""
+
+permissions:
+  id-token: write   # OIDC federation into the CI role
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330   # under the 6h job cap; the capture itself is bounded by --minutes
+    env:
+      AWS_REGION: us-east-1
+      S3_BUCKET: derekkuang-crypto-de-raw-546712138633-us-east-1-an
+      KALSHI_API_BASE: https://external-api.kalshi.com/trade-api/v2
+      CAPTURE_MINUTES: ${{ inputs.minutes || '90' }}
+      CAPTURE_PREFIX: ${{ inputs.prefix || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::546712138633:role/crypto-de-ci
+          aws-region: us-east-1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (locked)
+        run: uv sync --frozen
+
+      - name: Capture in-play microstructure
+        run: |
+          ARGS="--minutes $CAPTURE_MINUTES"
+          if [ -n "$CAPTURE_PREFIX" ]; then ARGS="$ARGS --prefix $CAPTURE_PREFIX"; fi
+          uv run python -m ml.lp.ws_features $ARGS
+
+      - name: Land features to the S3 raw zone
+        run: uv run python -m ingestion.ws_feature_storage

@@ -1,0 +1,27 @@
+version: 2
+
+models:
+  - name: stg_ws_features
+    description: >
+      Cleaned WS microstructure features — one row per (market_ticker, snapshot_at), a view over
+      the raw capture. The feature set for the toxicity/selection model.
+    columns:
+      - name: market_ticker
+        tests:
+          - not_null
+      - name: snapshot_at
+        tests:
+          - not_null
+      - name: mid
+        description: "(bid + ask) / 2 (dollars, 0..1)."
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - market_ticker
+              - snapshot_at

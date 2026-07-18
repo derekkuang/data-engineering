@@ -1,0 +1,30 @@
+version: 2
+
+models:
+  - name: fct_ws_markout
+    description: >
+      Toxicity / ML label table: each microstructure snapshot joined forward (H=30s) to a later
+      mid. `flow_signed_markout_c` > 0 means net taker flow predicted the mid move = adverse
+      selection (toxic flow a resting maker gets picked off by). Aggregate per market to rank
+      toxicity; use the microstructure columns as features to train the selection model.
+    columns:
+      - name: market_ticker
+        tests:
+          - not_null
+      - name: snapshot_at
+        tests:
+          - not_null
+      - name: fwd_mid
+        description: "Mid at the nearest snapshot in [t+30s, t+150s) — the forward reference."
+        tests:
+          - not_null
+      - name: flow_signed_markout_c
+        description: "sign(signed_flow_1m) * forward mid move (cents); >0 = toxic (flow led price)."
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - market_ticker
+              - snapshot_at
