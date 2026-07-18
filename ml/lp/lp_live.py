@@ -24,6 +24,15 @@ Usage:
     uv run python -m ml.lp.lp_live --auth-check
     uv run python -m ml.lp.lp_live --test-order              # auto-picks a market
     uv run python -m ml.lp.lp_live --live --i-understand-live --minutes 15
+    uv run python -m ml.lp.lp_live --live --i-understand-live --prefix KXWC --ws  # WS-fed book
+
+WebSocket mode (--live --ws): runs THIS SAME strategy but sources market data over the WS
+(ingestion/kalshi_ws via ml/lp/ws_book_feed) instead of REST polling — the per-poll order
+book (orderbook_delta) AND our own fills (private `fill` channel, drained each poll). Order
+PLACEMENT and CANCELLATION stay REST: Kalshi has no WS order entry. Fills are reconciled
+against REST /portfolio/fills every FILL_RECONCILE_S (and forced on exit) because the fill
+channel has no seq numbers — REST stays authoritative, WS just lowers latency. Single-market:
+it feeds whichever one market is being quoted. The multi-market WS maker is a larger build.
 """
 
 from __future__ import annotations
@@ -53,6 +62,7 @@ from ml.lp.lp_pilot import (
     better_market,
     pick_smooth_ticker,
 )
+from ml.lp.ws_book_feed import WsBookFeed
 
 # V2 order endpoints (confirm via --test-order before --live; change here if needed).
 ORDER_PATH = "/portfolio/events/orders"  # POST create, DELETE {id} cancel
@@ -66,6 +76,12 @@ SKEW_PER_CONTRACT = 0.01
 QUOTE_SIZE = 2  # contracts posted per side per poll (was 1). The scale lever — the cap was
 #                 never binding (held +/-2-3 of 10), so size, not the cap, is what scales us.
 MARKOUT_HORIZON_S = 30  # seconds; the edge signal = did mid move against us post-fill
+# WS-fills (--ws): our executions arrive on the private `fill` channel (low latency) BUT it
+# carries no seq numbers, so a dropped message is undetectable. REST /portfolio/fills stays the
+# AUTHORITATIVE source — polled this often as a reconcile, and FORCED on market exit before we
+# flatten. trade_id dedup makes WS+REST overlap harmless, so a WS hiccup degrades to REST latency
+# (never wrong inventory). Bounds any WS-missed-fill inventory error to this window.
+FILL_RECONCILE_S = 12.0
 DEAD_BOOK_POLLS = 8  # consecutive one-sided/empty polls -> market resolved, end session
 NO_FILL_TIMEOUT_S = 240  # no fills this long -> leave the (illiquid/dud) market and roll
 # ABANDON THIN-AND-NOT-PAYING: low realized FLOW (not just zero fills) usually doesn't pay.
@@ -206,6 +222,16 @@ def _fill_count(f: dict[str, Any]) -> float:
     return float(f.get("count_fp") or f.get("count") or 0)
 
 
+def _fill_ts(f: dict[str, Any]) -> float:
+    """Fill exchange time in epoch SECONDS. REST fills carry `ts` (seconds); WS `fill` msgs
+    carry `ts_ms` (milliseconds) — normalize both so markouts line up regardless of source."""
+    if f.get("ts") is not None:
+        return float(f["ts"])
+    if f.get("ts_ms") is not None:
+        return float(f["ts_ms"]) / 1000.0
+    return time.time()
+
+
 def position(client: KalshiClient, ticker: str) -> int:
     """Net signed YES contracts in this market (long +, short -). Kalshi reports it
     as ``position_fp`` (a fixed-point string) under market_positions."""
@@ -289,6 +315,7 @@ def _run_market(
     quote_size: int = QUOTE_SIZE,
     config_tag: str = CONFIG_VERSION,
     prefixes: tuple[str, ...] | None = None,
+    feed: WsBookFeed | None = None,
 ) -> tuple[str, float, str | None]:
     """Quote one market until it resolves (dead book), the kill switch trips, the flow
     dries up (thin/illiquid), a much more active market appears (while we're flat), or
@@ -301,6 +328,7 @@ def _run_market(
 
     our_orders: dict[str, str] = {}  # order_id -> 'bid'/'ask' (so a fill -> buy/sell yes)
     seen: set[str] = {f["trade_id"] for f in fetch_fills(client, tk) if f.get("trade_id")}
+    fee_booked: set[str] = set()  # trade_ids whose fee we've applied — fee is REST-authoritative
     inv = 0.0  # signed YES contracts (FRACTIONAL), from OUR fills; immune to collateral noise
     cash = 0.0  # realized cash: -price on a buy(bid), +price on a sell(ask)
     n_fills = 0
@@ -318,12 +346,35 @@ def _run_market(
     last_fill = time.time()  # for the illiquid-exit timeout
     last_scan = time.time()  # for the periodic "is a hotter market available?" scan
     pnl_last_scan = 0.0  # P&L at the previous scan -> our $/min earning rate here
+    last_rest_fills = 0.0  # wall ts of the last REST /portfolio/fills reconcile (WS-fills cadence)
 
-    def ingest_fills() -> None:
-        nonlocal inv, cash, n_fills, last_fill
-        for f in fetch_fills(client, tk):
+    def ingest_fills(force_rest: bool = False) -> None:
+        """Account for new fills. With a WS feed, drain the `fill` channel each call for
+        low-latency INVENTORY and reconcile against REST every FILL_RECONCILE_S (or when forced —
+        on exit); without a feed, poll REST every call (unchanged). trade_id (`seen`) dedups
+        inventory across both sources; the FEE is applied once and only from the authoritative
+        REST record (a WS fill may omit fee_cost). A WS gap only costs latency, never $."""
+        nonlocal inv, cash, n_fills, last_fill, last_rest_fills
+        batch: list[tuple[dict[str, Any], bool]] = []  # (fill, is_rest)
+        if feed is not None:
+            # WS push: low-latency INVENTORY, but the `fill` payload's fee is unverified — so we
+            # book inventory now and defer the fee to the authoritative REST record below.
+            batch.extend((f, False) for f in feed.drain_fills())
+        now = time.time()
+        if feed is None or force_rest or now - last_rest_fills >= FILL_RECONCILE_S:
+            batch.extend((f, True) for f in fetch_fills(client, tk))  # REST — authoritative (fee)
+            last_rest_fills = now
+        for f, is_rest in batch:
             tid = f.get("trade_id")
-            if not tid or tid in seen:
+            if not tid:
+                continue
+            fee = float(f.get("fee_cost") or 0.0)
+            if tid in seen:
+                # inventory already booked; apply the fee ONCE, only from the REST record (a WS
+                # fill may omit fee_cost, so trusting it would drop the taker flatten fee).
+                if is_rest and fee and tid not in fee_booked:
+                    cash -= fee
+                    fee_booked.add(tid)
                 continue
             seen.add(tid)
             side = our_orders.get(str(f.get("order_id")))
@@ -342,8 +393,13 @@ def _run_market(
             else:  # our ask filled -> we sold yes
                 inv -= cnt
                 cash += px * cnt
-            cash -= float(f.get("fee_cost") or 0.0)  # maker fee ~0; taker fee on flatten
-            fill_log.append((float(f.get("ts") or time.time()), side, px, cnt))
+            # Fee is REST-authoritative: apply it now for a REST (or non-WS) fill; for a WS-first
+            # fill defer it to the REST reconcile (maker fee is 0; only the taker flatten has one,
+            # and exit always forces a REST true-up that catches it).
+            if is_rest or feed is None:
+                cash -= fee
+                fee_booked.add(tid)
+            fill_log.append((_fill_ts(f), side, px, cnt))
             n_fills += 1
             last_fill = time.time()
 
@@ -360,7 +416,13 @@ def _run_market(
             try:
                 ingest_fills()  # account for fills BEFORE cancelling this poll's orders
                 cancel_all(client, tk)
-                ba = best_bid_ask(client.get_market_orderbook(tk))
+                # Book source: WS local book (real-time, --ws) or a REST snapshot. `feed.top`
+                # is a drop-in for best_bid_ask — same (bid, ask) dollars + one-sided->None.
+                ba = (
+                    feed.top(tk)
+                    if feed is not None
+                    else best_bid_ask(client.get_market_orderbook(tk))
+                )
                 if ba is None:  # one-sided/empty book = market dying (e.g. near resolution)
                     empty_polls += 1
                     if empty_polls >= DEAD_BOOK_POLLS:
@@ -475,7 +537,7 @@ def _run_market(
             time.sleep(max(0.0, poll - (time.time() - t0)))
     finally:
         cancel_all(client, tk)
-        ingest_fills()  # capture any last fills
+        ingest_fills(force_rest=True)  # authoritative true-up before we decide what to flatten
         # AUTO-FLATTEN: close residual inventory with an AGGRESSIVE marketable IOC —
         # priced to cross every available level (sell at 0.01 / buy at 0.99) so it
         # fills against whatever liquidity exists, not just the touch. Retry once in
@@ -497,7 +559,7 @@ def _run_market(
                         f"  auto-flatten try {attempt + 1}: IOC {s} {qty:.2f} to close {inv:+.2f}"
                     )
                     time.sleep(0.7)
-                    ingest_fills()
+                    ingest_fills(force_rest=True)
                 except Exception as exc:
                     print(f"  auto-flatten error: {str(exc)[:80]}")
             cancel_all(client, tk)
@@ -629,6 +691,7 @@ def live(
     switch: bool = True,
     ab: bool = False,
     prefixes: tuple[str, ...] | None = None,
+    use_ws: bool = False,
 ) -> int:
     """Wall-clock session: quote a market, ROLL to a fresh one when it resolves, and
     (if `switch`) jump to a much more active market mid-session whenever we're flat —
@@ -650,43 +713,61 @@ def live(
         else ""
     )
     universe = ",".join(prefixes) if prefixes else "all benign sports"
+    book_src = (
+        "WS local book + `fill` channel (REST reconcile)" if use_ws else "REST orderbook snapshots"
+    )
     print(
         f"LIVE session: cap +/-{MAX_POSITION}, kill -${DAILY_LOSS_LIMIT:.0f}/mkt + session, "
-        f"{minutes:.0f} min wall-clock — rolls on resolve{sw}. Universe: {universe}."
+        f"{minutes:.0f} min wall-clock — rolls on resolve{sw}. Universe: {universe}. "
+        f"Book: {book_src}."
     )
+    # WS feeds the per-poll book AND our fills (drained each poll, reconciled vs REST every
+    # FILL_RECONCILE_S); cancels + order placement stay REST (Kalshi has no WS order entry).
+    # Selection (pick_smooth_ticker) also stays REST — one-shot per candidate, not the hot loop.
+    feed = WsBookFeed(client, channels=("orderbook_delta", "fill")) if use_ws else None
     retired: set[str] = set()
     pending: str | None = None  # a switch target to go to next (skips re-selection)
     session_pnl = 0.0
     n_markets = 0
-    while time.time() < end:
-        tk = ticker or pending or pick_smooth_ticker(client, exclude=retired, prefixes=prefixes)
-        pending = None
-        if not tk:
-            print("  no fresh active market right now; waiting 15s ...")
-            time.sleep(15)
-            continue
-        n_markets += 1
-        size = random.choice([1, 2]) if ab else QUOTE_SIZE
-        tag = f"{CONFIG_VERSION}-ab" if ab else CONFIG_VERSION
-        ab_note = f" [AB {size}x]" if ab else ""
-        print(
-            f"\n=== market {n_markets}: {tk}  "
-            f"({(end - time.time()) / 60:.0f} min left){ab_note} ==="
-        )
-        reason, pnl, nxt = _run_market(
-            client, tk, end, poll, debug, retired, allow_switch, size, tag, prefixes
-        )
-        session_pnl += pnl
-        if reason == "switch":
-            pending = nxt  # go straight to the hotter market; don't retire this one
-        else:
-            retired.add(tk)  # resolved/dud/left markets won't be re-picked this session
-        print(f"  [{tk}] ended ({reason}); session P&L so far ${session_pnl:+.2f}")
-        if reason == "kill" or session_pnl <= -DAILY_LOSS_LIMIT:
-            print("  SESSION KILL — stopping.")
-            break
-        if ticker:  # a pinned market can't be rolled
-            break
+    try:
+        while time.time() < end:
+            tk = ticker or pending or pick_smooth_ticker(client, exclude=retired, prefixes=prefixes)
+            pending = None
+            if not tk:
+                print("  no fresh active market right now; waiting 15s ...")
+                time.sleep(15)
+                continue
+            n_markets += 1
+            size = random.choice([1, 2]) if ab else QUOTE_SIZE
+            # Tag the session by ruleset so analysis can separate runs. '-ws' marks a
+            # WS-fed book (so WS-vs-REST capture/markout is comparable, not blended).
+            tag = CONFIG_VERSION + ("-ab" if ab else "") + ("-ws" if use_ws else "")
+            ab_note = f" [AB {size}x]" if ab else ""
+            print(
+                f"\n=== market {n_markets}: {tk}  "
+                f"({(end - time.time()) / 60:.0f} min left){ab_note} ==="
+            )
+            if feed is not None:  # subscribe this market's book on the WS, wait for first snapshot
+                feed.subscribe(tk)
+                ready = feed.wait_for_book(tk, timeout=5.0)
+                print(f"  [ws] book {'live' if ready else 'not ready (loop will wait)'} for {tk}")
+            reason, pnl, nxt = _run_market(
+                client, tk, end, poll, debug, retired, allow_switch, size, tag, prefixes, feed=feed
+            )
+            session_pnl += pnl
+            if reason == "switch":
+                pending = nxt  # go straight to the hotter market; don't retire this one
+            else:
+                retired.add(tk)  # resolved/dud/left markets won't be re-picked this session
+            print(f"  [{tk}] ended ({reason}); session P&L so far ${session_pnl:+.2f}")
+            if reason == "kill" or session_pnl <= -DAILY_LOSS_LIMIT:
+                print("  SESSION KILL — stopping.")
+                break
+            if ticker:  # a pinned market can't be rolled
+                break
+    finally:
+        if feed is not None:
+            feed.close()
     print(f"\nSESSION DONE: {n_markets} market(s), total mark P&L ${session_pnl:+.2f}")
     return 0
 
@@ -718,6 +799,12 @@ def main() -> int:
         help="restrict to ticker prefix(es), comma-separated. Use KXWC for World-Cup-only "
         "(the only consistently profitable cell; basketball/baseball are toxic). e.g. KXWC",
     )
+    ap.add_argument(
+        "--ws",
+        action="store_true",
+        help="source market data over WebSocket: the per-poll order book AND our fills "
+        "(REST-reconciled). Order placement/cancel stay REST (no WS order entry). Single-market.",
+    )
     args = ap.parse_args()
 
     load_dotenv()  # pick up KALSHI_API_BASE/KEY_ID + the inline key from .env
@@ -747,7 +834,7 @@ def main() -> int:
             prefixes = tuple(p.strip() for p in args.prefix.split(",")) if args.prefix else None
             return live(
                 client, args.ticker, args.minutes, args.poll, args.debug,
-                switch=not args.no_switch, ab=args.ab, prefixes=prefixes,
+                switch=not args.no_switch, ab=args.ab, prefixes=prefixes, use_ws=args.ws,
             )
         print("Pick a mode: --auth-check | --test-order | --live --i-understand-live")
         return 1

@@ -100,6 +100,12 @@ def rest_top_of_book(book: dict[str, Any]) -> tuple[float | None, float | None]:
     return _touch(norm(yes), norm(no))
 
 
+# Private, ACCOUNT-WIDE channels: they report all of the user's activity regardless of market,
+# so they must be subscribed with NO market_tickers filter. Filtering `fill` by market is a bug —
+# the maker rolls markets, and a market-scoped fill subscription goes silent after the first one.
+ACCOUNT_CHANNELS = frozenset({"fill"})
+
+
 class KalshiWS:
     """One authenticated WS connection maintaining a local book per subscribed market."""
 
@@ -108,6 +114,7 @@ class KalshiWS:
         self.books: dict[str, LocalBook] = {}
         self.trade_counts: dict[str, int] = {}  # market_ticker -> public trades seen
         self.trades: list[dict[str, Any]] = []  # buffer of trade msgs, drained by the logger
+        self.fills: list[dict[str, Any]] = []  # buffer of OUR fill msgs (private `fill` channel)
         self._ws: Any = None
         self._gaps = 0
         self._reconnects = 0
@@ -134,11 +141,24 @@ class KalshiWS:
     async def subscribe(
         self, tickers: list[str], channels: tuple[str, ...] = ("orderbook_delta",)
     ) -> None:
+        """Subscribe the desired set. Market-scoped channels (orderbook_delta, trade) carry the
+        market_tickers list; ACCOUNT-WIDE channels (fill) are subscribed with NO market filter so
+        every one of our fills arrives regardless of which market it's in — the maker rolls
+        markets, and a market-scoped fill subscription would go silent after the first one."""
         self.set_subscription(tickers, channels)
-        await self._ws.send(json.dumps({
-            "id": 1, "cmd": "subscribe",
-            "params": {"channels": list(channels), "market_tickers": tickers},
-        }))
+        market_ch = [c for c in channels if c not in ACCOUNT_CHANNELS]
+        account_ch = [c for c in channels if c in ACCOUNT_CHANNELS]
+        if market_ch:
+            await self._ws.send(json.dumps({
+                "id": 1, "cmd": "subscribe",
+                "params": {"channels": market_ch, "market_tickers": list(tickers)},
+            }))
+        if account_ch:
+            self._next_id += 1
+            await self._ws.send(json.dumps({
+                "id": self._next_id, "cmd": "subscribe",
+                "params": {"channels": account_ch},  # account-wide: no market_tickers filter
+            }))
 
     async def update_subscription(self, channel: str, tickers: list[str], action: str) -> None:
         """Add/remove markets (or get_snapshot) on an existing subscription WITHOUT
@@ -179,6 +199,9 @@ class KalshiWS:
             sub = m.get("msg", {})
             self._sids[sub.get("channel")] = sub.get("sid")
             return
+        if t == "error":  # surface subscribe/auth failures (e.g. a bad channel) instead of dropping
+            logger.warning("WS error: %s", m.get("msg"))
+            return
         sid, seq = m.get("sid"), m.get("seq")
         if sid is not None and seq is not None:  # gap detection is PER STREAM (sid), not per market
             wm = self._seq_by_sid.get(sid)
@@ -196,10 +219,17 @@ class KalshiWS:
         elif t == "trade":
             self.trade_counts[ticker] = self.trade_counts.get(ticker, 0) + 1
             self.trades.append(msg)
+        elif t == "fill":  # OUR execution on the private `fill` channel; maker drains + dedups
+            self.fills.append(msg)
 
     def drain_trades(self) -> list[dict[str, Any]]:
         """Return and clear the buffered trade messages (the logger persists them)."""
         out, self.trades = self.trades, []
+        return out
+
+    def drain_fills(self) -> list[dict[str, Any]]:
+        """Return and clear buffered OUR-fill messages (the maker drains + dedups by trade_id)."""
+        out, self.fills = self.fills, []
         return out
 
     async def run(self) -> None:
