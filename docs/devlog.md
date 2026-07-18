@@ -4,6 +4,22 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-07-16 → 18 — universe mart LIVE in Athena; opportunity dashboard + auto-logger built; --ws maker bug fixed
+
+Built out the "full Kalshi platform" from the 07-15 mart into a working end-to-end slice + serving layer + collection loop. All committed on `ws-multimarket-logger` (pushed to origin, tip `998a718`); NOT merged to main.
+
+**AWS promotion — the universe mart is LIVE.** Landed a real snapshot to S3, created the Glue table `crypto_raw.kalshi_universe` (admin profile = `crypto-de-deployer`; pipeline user `crypto-de-pipeline` is read-only), verified read-only, and `dbt build --select +fct_kalshi_opportunity` against Athena = **PASS=13** (stg view + mart table + 11 tests). Real data: **12,080 open markets / 1,795 series**; the radar's sweet-spot correctly surfaces the soccer/sports totals (KXWCTOTALGOAL, KXITF, etc.) and flags the maker-fee traps. Added `.env`-driven daily snapshot step to `pipeline.yml`.
+
+**Dashboard (component 4) — the serving layer, committed.** `dashboard/app.py` (Streamlit "Kalshi Opportunity Radar": KPI tiles, spread-vs-volume scatter w/ maker-fee color + retail-band shading, category bar, sweet-spot table), `publish_snapshot.py` (Athena→local snapshot), `dashboard/data/opportunity_snapshot.parquet` (committed via a gitignore exception so it deploys self-contained), `dashboard` dep group (streamlit+plotly). Verified: ruff clean + data logic checked on real data. **UI runtime NOT smoke-tested** — streamlit/plotly wouldn't finish installing on the throttled connection; run `uv sync --group dashboard && uv run --group dashboard streamlit run dashboard/app.py` when the connection allows.
+
+**Auto-logger (component 2 foundation) — committed.** The toxicity/ML collection loop the "is it just theory?" question needs: `ml/lp/ws_features.py` (captures live board microstructure) → `ingestion/ws_feature_storage.py` (→ S3) → dbt `stg_ws_features` → `fct_ws_markout` (each snapshot joined forward 30s → `flow_signed_markout_c`; >0 = toxic flow led price). Scheduled by `.github/workflows/ws-capture.yml` (game-window crons + dispatch). `docs/setup/09`. Verified offline (ruff/mypy/pytest 52/dbt parse). NOT live yet (no Glue table, no data).
+
+**--ws maker bug FIXED (`998a718`).** The private `fill` channel was subscribed with market_tickers → went silent after the maker rolled markets (markets 2..N got no WS fills). Fixed: `subscribe()` now sends account-wide channels (fill) with NO market filter. Also made the fee REST-authoritative (a WS fill may omit fee_cost). pytest 53. Live verification still pending (auth session during a game).
+
+**⚠ MERGE-TO-MAIN PREREQUISITE (or the nightly cron breaks):** `dbt build` in the scheduled pipeline runs ALL models. On merge to main it will try to build `stg_lp_*`/`fct_lp_*` and `stg_ws_features`/`fct_ws_markout`, whose Glue sources **do not exist** (`crypto_raw` has only coinbase_ohlcv, kalshi_btc_15min, kalshi_universe). BEFORE merging: create `lp_sessions`+`lp_fills` (docs/setup/07 DDL) and `ws_features` (docs/setup/09 DDL) under the **admin** profile, else the nightly build fails on missing sources. (kalshi_universe already created.)
+
+---
+
 ## 2026-07-15 — CONSOLIDATION: "full Kalshi platform" — component (1) the universe-opportunity mart BUILT + verified offline; Kalshi Pro / fee / incentive research
 
 Decided the project's coherent endgame is a **full-Kalshi screening+trading platform** (the 06-26 checkpoint already reframed the project as "the trading bot IS the DE project / finding edge on Kalshi"). Deep-research on **Kalshi Pro** (launched 2026-07-13, free public beta) + the 2026 profit landscape (3 workflow legs, session-limit-throttled; hand-synthesized from the journal + my own live API checks). Key verified facts:
