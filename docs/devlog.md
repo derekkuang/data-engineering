@@ -4,6 +4,12 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-07-20 — CI green: created the missing Glue tables + landed LP data (the flagged merge prerequisite)
+
+`ci.yml` runs `dbt build` against Athena on every push, and it was failing: `Table 'awsdatacatalog.crypto_raw.lp_fills'/'lp_sessions' does not exist` (the lp — and, on newer commits, ws_features — Glue tables were never created; the models select from them). This is exactly the prerequisite flagged in the 07-16→18 entry. Fixed properly (not patched): landed the real LP bot CSVs to S3 (`ingestion.lp_storage`, June 16-27, 12 partitions each), created `lp_sessions`+`lp_fills`+`ws_features` Glue tables (admin profile, DDL from docs/07+09), and ran the full `dbt build` vs Athena = **PASS=94, ERROR=0, SKIP=0**. `fct_lp_daily`/`fct_lp_market_session` are now LIVE with real data; `ws_features`/`fct_ws_markout` exist but empty until the auto-logger runs. Merge to main is now safe. Root coupling to remember: CI builds ALL models against the real warehouse on push, so create a new model's Glue source table BEFORE pushing the model.
+
+---
+
 ## 2026-07-16 → 18 — universe mart LIVE in Athena; opportunity dashboard + auto-logger built; --ws maker bug fixed
 
 Built out the "full Kalshi platform" from the 07-15 mart into a working end-to-end slice + serving layer + collection loop. All committed on `ws-multimarket-logger` (pushed to origin, tip `998a718`); NOT merged to main.
