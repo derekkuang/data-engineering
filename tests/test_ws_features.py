@@ -68,3 +68,30 @@ def test_vol_features_single_point_is_zero() -> None:
     st.add_mid(0.40, now=1000.0)
     v = st.vol_features()
     assert v["midvol_1m"] == 0.0 and v["midmove_1m"] == 0.0
+
+
+def test_discover_markets_wide_vs_gated() -> None:
+    """The capture's wide mode keeps the known-toxic controls (ITF, GAME/MATCH types) that the
+    maker's trading gate excludes — but both modes keep the activity floor and prop excludes."""
+    from typing import Any, cast
+
+    from ingestion.kalshi import KalshiClient
+    from ml.lp.ws_logger import discover_markets
+
+    class FakeClient:
+        def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+            def rows(tk: str, n: int) -> list[dict[str, str]]:
+                return [{"ticker": tk}] * n
+            return {"trades": (
+                rows("KXMLSTOTAL-A", 20)        # benign TOTAL, active -> both modes
+                + rows("KXITFMATCH-B", 25)      # known-toxic control -> wide only
+                + rows("KXMLBGAME-C", 18)       # GAME type (trends) -> wide only
+                + rows("KXMLSTOTAL-THIN", 3)    # under the activity floor -> neither
+                + rows("KXWCGOAL-D", 30)        # JUMPY prop -> neither (label too noisy)
+            )}
+
+    client = cast(KalshiClient, FakeClient())
+    gated = discover_markets(client, None, 10)
+    wide = discover_markets(client, None, 10, wide=True)
+    assert gated == ["KXMLSTOTAL-A"]
+    assert set(wide) == {"KXMLSTOTAL-A", "KXITFMATCH-B", "KXMLBGAME-C"}

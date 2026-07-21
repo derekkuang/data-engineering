@@ -34,7 +34,7 @@ from dotenv import load_dotenv
 
 from ingestion.kalshi import SERIES_BTC_15M, KalshiClient
 from ingestion.kalshi_ws import KalshiWS, rest_top_of_book
-from ml.lp.lp_gate import passes_gate
+from ml.lp.lp_gate import MIN_RECENT_TRADES, passes_gate
 from ml.lp.lp_pilot import BENIGN_PREFIXES, EXCLUDE, JUMPY, is_mean_reverting
 
 CHANNELS = ("orderbook_delta", "trade")
@@ -58,10 +58,13 @@ def _append(path: str, header: list[str], rows: list[list[Any]]) -> None:
 
 
 def discover_markets(
-    client: KalshiClient, prefixes: tuple[str, ...] | None, cap: int
+    client: KalshiClient, prefixes: tuple[str, ...] | None, cap: int, *, wide: bool = False
 ) -> list[str]:
-    """Active, gate-eligible, mean-reverting (TOTAL/SPREAD) markets, most active first — the
-    same universe the maker quotes, but the whole LIST instead of one pick."""
+    """Active sports markets, most active first. Default = the maker's TRADING universe
+    (gate-eligible + mean-reverting TOTAL/SPREAD only). ``wide`` = the MEASUREMENT universe:
+    the activity floor only, KEEPING the known-toxic families (ITF, MATCH/GAME types) — they
+    are the labeled positive controls that validate the markout instrument and give the
+    toxicity model its toxic class. Never widen the maker; only widen the capture."""
     trades = client.get("/markets/trades", params={"limit": 1000}).get("trades", [])
     pfx = prefixes or BENIGN_PREFIXES
     counts: Counter[str] = Counter()
@@ -75,7 +78,10 @@ def discover_markets(
     for tk, c in counts.most_common():
         if len(out) >= cap:
             break
-        if passes_gate(tk, c) and is_mean_reverting(tk):
+        if wide:
+            if c >= MIN_RECENT_TRADES:
+                out.append(tk)
+        elif passes_gate(tk, c) and is_mean_reverting(tk):
             out.append(tk)
     return out
 

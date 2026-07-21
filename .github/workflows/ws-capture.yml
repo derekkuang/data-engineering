@@ -64,8 +64,10 @@ jobs:
         run: uv sync --frozen
 
       - name: Capture in-play microstructure
+        # --wide = the MEASUREMENT universe: keeps known-toxic families (ITF, MATCH/GAME) as
+        # labeled markout controls. The maker's trading gate stays narrow; only capture widens.
         run: |
-          ARGS="--minutes $CAPTURE_MINUTES"
+          ARGS="--minutes $CAPTURE_MINUTES --wide"
           if [ -n "$CAPTURE_PREFIX" ]; then ARGS="$ARGS --prefix $CAPTURE_PREFIX"; fi
           uv run python -m ml.lp.ws_features $ARGS
 

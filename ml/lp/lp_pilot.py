@@ -63,6 +63,25 @@ BENIGN_PREFIXES = (
     "KXTENNIS",
     "KXGOLF",
     "KXRT",
+    # Club soccer — the post-WC primary hypothesis (probed 2026-07-05: SPREAD/TOTAL series
+    # exist for all of these). Summer leagues are live now; European majors from ~mid-August.
+    "KXMLS",
+    "KXLIGAMX",
+    "KXBRASILEIRO",
+    "KXALLSVENSKAN",
+    "KXELITESERIEN",
+    "KXDENSUPERLIGA",
+    "KXCOPADOBRASIL",
+    "KXEPL",
+    "KXLALIGA",
+    "KXSERIEA",
+    "KXBUNDESLIGA",
+    "KXLIGUE1",
+    "KXUCL",
+    "KXUEL",
+    "KXEREDIVISIE",
+    "KXEFLCHAMPIONSHIP",
+    "KXSAUDIPL",
 )
 EXCLUDE = ("15M", "PERP", "KXBTC", "KXETH", "KXSOL", "KXHYPE", "KXXRP", "KXDOGE")
 # Discrete-jump prop types to skip for a "smooth" market (price lurches on an event).

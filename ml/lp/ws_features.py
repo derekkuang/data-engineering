@@ -159,7 +159,7 @@ def _append(path: str, rows: list[list[Any]]) -> None:
 
 async def run(
     *, tickers: list[str] | None, prefixes: tuple[str, ...] | None, use_btc: bool,
-    minutes: float, cap: int, snapshot_s: float, refresh_s: float,
+    minutes: float, cap: int, snapshot_s: float, refresh_s: float, wide: bool = False,
 ) -> int:
     client = KalshiClient(pace_seconds=0.1)
     fixed = tickers is not None or use_btc
@@ -170,7 +170,7 @@ async def run(
                       key=lambda m: m.get("volume") or 0, reverse=True)
         current = [m["ticker"] for m in mkts[:cap]]
     else:
-        current = discover_markets(client, prefixes, cap)
+        current = discover_markets(client, prefixes, cap, wide=wide)
     if not current:
         print("no active eligible markets right now — idle. (try --prefix off-hours, or --btc)")
         client.close()
@@ -208,7 +208,7 @@ async def run(
                   f"({len(ws.books)} books, {sum(ws.trade_counts.values())} trades seen, "
                   f"seq-gaps {ws._gaps})")
             if not fixed and now - last_refresh >= refresh_s:
-                new = discover_markets(client, prefixes, cap)
+                new = discover_markets(client, prefixes, cap, wide=wide)
                 add = [t for t in new if t not in current]
                 rem = [t for t in current if t not in new]
                 if add:
@@ -238,13 +238,16 @@ def main() -> int:
     ap.add_argument("--cap", type=int, default=40)
     ap.add_argument("--snapshot", type=float, default=5.0, help="seconds between feature rows")
     ap.add_argument("--refresh", type=float, default=90.0, help="seconds between re-discovery")
+    ap.add_argument("--wide", action="store_true",
+                    help="MEASUREMENT universe: activity floor only, keeping known-toxic "
+                         "families (ITF, MATCH/GAME) as labeled markout controls")
     args = ap.parse_args()
     load_dotenv()
     prefixes = tuple(p.strip() for p in args.prefix.split(",")) if args.prefix else None
     tickers = [t.strip() for t in args.tickers.split(",")] if args.tickers else None
     return asyncio.run(run(
         tickers=tickers, prefixes=prefixes, use_btc=args.btc, minutes=args.minutes,
-        cap=args.cap, snapshot_s=args.snapshot, refresh_s=args.refresh,
+        cap=args.cap, snapshot_s=args.snapshot, refresh_s=args.refresh, wide=args.wide,
     ))
 
 
