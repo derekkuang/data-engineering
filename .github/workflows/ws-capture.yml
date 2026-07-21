@@ -37,6 +37,12 @@ jobs:
       AWS_REGION: us-east-1
       S3_BUCKET: derekkuang-crypto-de-raw-546712138633-us-east-1-an
       KALSHI_API_BASE: https://external-api.kalshi.com/trade-api/v2
+      # Kalshi's WS requires auth even for market data (ws_handshake refuses without a key).
+      # Set these two REPO SECRETS: KALSHI_API_KEY_ID + KALSHI_PRIVATE_KEY (the PEM contents —
+      # the client loads an inline PEM from this env var). NOTE: Kalshi keys are full-account
+      # (no read-only scope) — see docs/setup/09 for the risk note before adding them.
+      KALSHI_API_KEY_ID: ${{ secrets.KALSHI_API_KEY_ID }}
+      KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
       CAPTURE_MINUTES: ${{ inputs.minutes || '90' }}
       CAPTURE_PREFIX: ${{ inputs.prefix || '' }}
     steps:

@@ -19,7 +19,18 @@ It places no orders and needs no trading key.
 ## 1. Capture + land (automatic)
 
 `.github/workflows/ws-capture.yml` fires at game-heavy windows (19:00 / 23:00 / 02:00 UTC),
-captures ~90 min of the live board, and lands it to S3. To run a specific game by hand, use
+captures ~90 min of the live board, and lands it to S3.
+
+**One-time: add the Kalshi key as repo secrets.** Kalshi's WebSocket requires auth even for
+market data, so the workflow needs `KALSHI_API_KEY_ID` and `KALSHI_PRIVATE_KEY` (the PEM file's
+*contents*) as GitHub Actions repo secrets (Settings → Secrets and variables → Actions).
+**Risk note:** Kalshi API keys are full-account — there is no read-only scope — so the secret
+could place orders if exfiltrated. Mitigations: Actions secrets are encrypted, never exposed to
+fork PRs, and this is a single-maintainer repo; for stricter isolation, create a SEPARATE Kalshi
+API key for CI (revocable independently of the trading key), or run the capture on AWS with the
+key in Secrets Manager instead (see Notes).
+
+To run a specific game by hand, use
 the workflow's `workflow_dispatch` (set `minutes` / `prefix`), or locally:
 
 ```bash
