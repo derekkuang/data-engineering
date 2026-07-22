@@ -71,5 +71,14 @@ jobs:
           if [ -n "$CAPTURE_PREFIX" ]; then ARGS="$ARGS --prefix $CAPTURE_PREFIX"; fi
           uv run python -m ml.lp.ws_features $ARGS
 
+      # The capture step outlives the 1-hour OIDC session (90+ min), so the job-start
+      # credentials are EXPIRED by the time we upload. Re-exchange the OIDC token for a
+      # fresh session right before landing — robust for any --minutes value.
+      - name: Refresh AWS credentials (capture outlives the 1h OIDC session)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::546712138633:role/crypto-de-ci
+          aws-region: us-east-1
+
       - name: Land features to the S3 raw zone
         run: uv run python -m ingestion.ws_feature_storage
