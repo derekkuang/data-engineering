@@ -1,0 +1,32 @@
+version: 2
+
+models:
+  - name: fct_toxicity_by_family
+    description: >
+      The toxicity scoreboard: per (sport, market_type, capture day), the flow-signed markout
+      aggregates from the WS in-play capture — computed over FLOW-BEARING snapshots only
+      (signed_flow_1m != 0), since the label is 0 by construction without flow.
+      avg_flow_markout_c > 0 = taker flow led price = toxic for a resting maker. The day grain
+      feeds ml/lp/edge_verdict.py's day-block bootstrap. ITF / MLB-GAME rows are deliberate
+      known-toxic controls that validate the instrument.
+    columns:
+      - name: sport
+        tests:
+          - not_null
+      - name: market_type
+        tests:
+          - not_null
+      - name: capture_day
+        tests:
+          - not_null
+      - name: n_flow_obs
+        description: "Flow-bearing snapshots — the sample size that matters for the verdict."
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - sport
+              - market_type
+              - capture_day

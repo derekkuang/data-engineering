@@ -104,3 +104,18 @@ cd dbt && DBT_PROFILES_DIR=. uv run dbt build --select +fct_ws_markout
   specific games, or move to an always-on runner (Phase 6) for full coverage.
 - **This is the edge test + the ML input**: the toxicity question ("is the flow benign?") the
   WC result left open is answered by aggregating `flow_signed_markout_c` per market here.
+
+## 4. The verdict (once ~5+ game days have accrued)
+
+`fct_toxicity_by_family` (built nightly) rolls the markout label up per (sport, market_type,
+day); then:
+
+```bash
+uv run python -m ml.lp.edge_verdict            # FLOW-TOXIC / FLOW-BENIGN / INCONCLUSIVE /
+uv run python -m ml.lp.edge_verdict --min-days 3   # INSUFFICIENT, per family (early look)
+```
+
+Day-block bootstrap CIs, split-half stability, and instrument controls: ITF / MLB-GAME are
+captured *on purpose* (the `--wide` mode) as known-toxic controls — if they don't read toxic,
+distrust every benign verdict. FLOW-BENIGN families are the stage-2 candidates (run the bot,
+judge realized capture in `fct_lp_daily`); benign flow alone is not an edge.
