@@ -1,159 +1,151 @@
 # data-engineering
 
-**Project: Crypto Market Data Engineering Platform — and an honest hunt for an edge it was never supposed to find**
+**A market-data platform that hunts trading edges on Kalshi — and is rigorous enough to kill its own results.**
+
+It began as a crypto ELT portfolio project: ingest market data, model it with dbt, prove the pipeline with an ML layer benchmarked against a real prediction market. The ML layer did its job *by proving the market efficient* — and the platform outgrew its first target. Today it is an end-to-end research-and-trading system for Kalshi: a daily whole-exchange opportunity radar, an in-play microstructure capture that measures which order flow is safe to trade against, a live real-money market-making bot, and a statistical verdict layer that decides — with day-block confidence intervals — whether the one surviving edge is real.
+
+**The framing rule, written before any model was trained:** this is a *data platform* project, not a prediction project. The platform's job is to produce answers trustworthy enough to bet real money on — including, especially, the answer "no." That rule has now survived two acts: the crypto act ended with a provably efficient market, and the trading act is being decided by measurement rather than hope.
 
 ---
 
-**Goal**
+**Project Status** (updated 2026-07-22) — this table is the source of truth for what exists today.
 
-Build a production-grade ELT platform that ingests crypto market data at minute-to-tick granularity, transforms it into a point-in-time-correct feature mart with dbt, orchestrates it with Airflow + scheduled cloud runs, and stress-tests an ML layer against a real prediction market (Kalshi's 15-minute BTC binaries) with walk-forward validation, real cost modeling, and live-execution experiments. The finished product is something you can walk an interviewer through end-to-end and explain every architectural decision — including why the model, correctly evaluated, makes no money.
-
-**The framing rule.** This is not a Bitcoin price-prediction project. It is a *data platform* project that happens to use crypto data: a point-in-time-correct feature store, incremental loads, a tested transformation layer, and a research harness rigorous enough to kill its own results. The model at the end demonstrates that the platform works — not that markets are beatable. This rule was written before the ML work began, and the ML work proved it right.
+| Layer | Component | Status | Notes |
+|---|---|---|---|
+| Ingestion | Coinbase / Kalshi / Deribit / Binance history | ✅ Built | 4 sources; watermark-driven, idempotent day-partition Parquet; 53M-trade tick aggregation |
+| Ingestion | **Kalshi universe snapshot** (whole exchange, daily) | ✅ **Live** | ~12,000 open markets / ~1,800 series per day: spread, depth, volume, maker-fee flag |
+| Ingestion | **In-play WS microstructure capture** | ✅ Live | Multi-market WebSocket book+flow features every ~5s during games, scheduled at game windows |
+| Ingestion | AWS Lambda order-book collector | ✅ Built | Serverless 24/7 capture of live books at decision minutes (~$0/mo); the crypto act's irreproducible dataset |
+| Warehouse | S3 → Glue → Athena lakehouse | ✅ Live | 6 external tables, partition projection, least-privilege IAM |
+| Warehouse | dbt medallion (16 models, ~80 tests) | ✅ Live | PIT-correct feature store (Iceberg MERGE) + LP P&L marts + opportunity mart + markout/toxicity marts |
+| Serving | **Streamlit "Opportunity Radar" dashboard** | ✅ Built | Spread-vs-volume landscape, maker-fee flags, sweet-spot table; offline-first, deploys with no AWS creds |
+| Execution | **Live market-making bot** (real money) | ✅ Built | Two-sided quoting, inventory skew, kill switches, WS-fed book + fills, per-fill markout logging |
+| Measurement | **Toxicity scoreboard + edge verdict** | ✅ Built | Flow-signed markout per family/day → day-block bootstrap CIs → FLOW-TOXIC / BENIGN / INSUFFICIENT |
+| Orchestration | CI + daily pipeline + game-window capture (GitHub Actions, OIDC) | ✅ Live | `pytest` + `dbt build` against the real warehouse on every push; two scheduled data crons; no stored AWS keys |
+| Orchestration | Airflow DAG (Astro Runtime 3) | ✅ Built | Local orchestration showcase; Actions is the unattended production path |
+| Research | The edge question itself | 🔄 **Measuring** | The machine is collecting; the verdict script decides when ~5+ game days accrue |
 
 ---
 
-**Project Status** (updated 2026-06-12) — this table is the source of truth for what exists today.
+## The story, in three acts
 
-| Component | Status | Notes |
+Full day-by-day record: [docs/devlog.md](docs/devlog.md) (24 entries — every experiment, number, and dead end).
+
+### Act 1 — The crypto platform, and a provably efficient market
+
+The original question: **using public data, can you beat Kalshi's 15-minute "BTC up or down?" market — net of spread, fees, and execution?** Answer, over ~10 experiments and two live data-collection campaigns: **no** — and the way the platform says no is the point.
+
+1. **The market is the benchmark, and it's good**: log loss 0.659 over ~6,100 settled windows, near-perfectly calibrated (ECE 0.5%).
+2. **The first "edge" was a leak** — caught by the point-in-time discipline. Leak-free, a walk-forward logistic **ties** the market (0.655 vs 0.662).
+3. **A +8% cost-aware backtest survived five leak-hunts** — so it was tested against reality: live order books captured at the decision instant showed the book repricing with BTC spot at R²=0.92 before an order could fill. A latency-bound lead-lag artifact, not alpha.
+4. **The last candidate (a decision-minute "profit cluster") was killed out-of-sample** by a week of serverless collection: −3.7% [−6.5, −1.4] on 650 fresh windows at its own assumed prices. In-period selection noise — exactly what its own day-block CIs had warned.
+5. Best single insight: less-liquid markets (HYPE) are measurably *mispriced* — and untradeable, because **the spread scales with the inefficiency**. Markets are efficient exactly to the limits of arbitrage.
+
+### Act 2 — The edge hunt: ~17 hypotheses, each measured, each killed
+
+The platform then swept every adjacent edge hypothesis. Every verdict below is *measured* (with method), not assumed:
+
+| Hypothesis | Verdict | How it was decided |
 |---|---|---|
-| Coinbase → S3 ingestion | ✅ Built | Paginated, rate-limited, idempotent Parquet writes; BTC + ETH 1-min bars |
-| Athena + Glue over S3 raw | ✅ Built | External tables, partition projection, least-privilege IAM, healthchecks |
-| dbt staging → intermediate → marts | ✅ Built | `fct_features_pit` (incremental Iceberg/MERGE) + custom point-in-time singular test |
-| GitHub Actions CI | ✅ Built | OIDC into a scoped IAM role (no stored keys): `pytest` + `dbt build` (schema + PIT tests) on every push |
-| Scheduled cloud pipeline | ✅ Built | GitHub Actions cron: daily Coinbase + Kalshi ingest → `dbt build` — the warehouse stays fresh with no laptop running |
-| Airflow `crypto_price_ingest` DAG | ✅ Built | Astro Runtime 3 / Airflow 3, dynamic task mapping; local orchestration demo |
-| Kalshi 15-min market ingestion | ✅ Built | `KXBTC15M` implied-prob/spread/result → S3 Parquet; backfill + live DAG task; PIT-safe join into the mart + forward label |
-| Derivatives + tick-flow ingestion | ✅ Built | Deribit perp funding (US-accessible); Binance Vision aggTrades archive — **53M trades** aggregated to minute taker-flow features |
-| AWS Lambda order-book collector | ✅ Built | Dependency-free handler + CloudFormation (EventBridge cron); banks the **live executable book + BTC spot** at three decision minutes of every 15-min window, 24/7, ~$0/month |
-| ML benchmark → model → cost-aware backtest | ✅ Built | Walk-forward only; Kalshi spread + fee cost model; no-skill controls; bootstrap CIs by day |
-| Live-execution experiments | ✅ Built | Decision-instant reconciliation, latency gate, forward paper-PnL, decision-minute cluster verdict on live books |
-| Unit tests for the research harness | ✅ Built | Money math (fee, PnL/settlement identities) + walk-forward leakage guarantees |
-| Streamlit dashboard | ⬜ Next | The visual telling of the arc below |
-| `crypto_features_refresh` DAG (run→test→inference) | ⬜ Deprioritized | Honest reason: there is no inference worth scheduling — see the finding |
+| BTC direction models (LR/GBM, walk-forward) | Null | Tie the market at best; leak-free by PIT construction |
+| +8% lead-lag backtest | Artifact | Live decision-instant books: repricing race, R²=0.92 vs spot |
+| Decision-minute cluster (W+9–13) | Selection noise | 650 fresh OOS windows via Lambda: −3.7% at own prices |
+| Favorite-longshot bias | Untradeable | Persistent, but trapped inside spread at every depth |
+| Settlement lag / threshold arb / options-implied | Null | Minute + live-book resolution; options price vol, not 15-min direction |
+| ETH / HYPE (thinner markets) | Untradeable | Friction scales with inefficiency (9c spread on the mispriced one) |
+| BTC market-making | Null | Sub-minute adverse selection; breakeven repricing ~3s |
+| Tennis (MM + directional) | Null | In-play martingale; autocorr ≈ 0, order-flow ≈ 0 |
+| Polymarket (spread + reward farming) | Dead | 1c spreads; rewards cover 2.2% of goal pick-off, measured live |
+| Cross-venue arb, binary↔perp basis | Null | Only offshore legs diverge; US-legal legs don't |
+| Kalshi weather — making | Dead | Maker pays ~0.44c/fill into end-of-day convergence pick-off |
+| Kalshi weather — forecasting | Dead | The crowd beats an NWP model at every morning decision point |
+| Kalshi perpetuals (funding arb) | Closed | ~$0.10 per $1k per settlement at retail capital; API gated |
+| **In-play soccer market-making** | **Survivor — unconfirmed** | The only positive cell; see Act 3 |
 
----
+### Act 3 — The survivor, and the machine built to judge it
 
-## The Finding — a real platform, and a provably efficient market
+The one strategy that made real money: **two-sided market-making in Kalshi's in-play soccer totals/spreads** — rare, discrete scoring keeps those books mean-reverting, so a maker collects wide retail spreads without being run over. A live bot (staged safety ladder, inventory skew, kill switches, per-fill markout logging) traded it with real money: **9 World-Cup days, net +$70, +0.59c/fill captured, 7/9 days positive** — and, honestly: thin, seasonal, fading as the tournament ended, and **still unconfirmed** as durable edge. External evidence agrees with the internal: an academic study of Kalshi's own 2021–2025 data finds makers-on-favorites is the exchange's only systematically positive cell.
 
-The ML layer's job was to answer one question honestly: **using public data, can you beat Kalshi's 15-minute "BTC up or down?" market — net of spread, fees, and execution?** The answer, established over ~10 experiments and two live data-collection campaigns, is **no** — and the way it says no is the strongest part of the project.
+So the project became the machine that decides the question properly:
 
-The arc (full detail in [docs/devlog.md](docs/devlog.md)):
+- **The opportunity radar** (`fct_kalshi_opportunity` + the dashboard): every series daily, ranked by gross capturable spread, flagged for maker fees — *where could an edge live?* (Kalshi's own Pro terminal ships a real-time screener; this platform's edge is the **historical/analytical** view it can't provide.)
+- **The toxicity capture** (`fct_ws_markout` → `fct_toxicity_by_family`): in-play flow measured every 5s, each snapshot labeled with what the price did 30s later. Net-taker-flow-predicts-price = a maker gets picked off. Known-toxic families (ITF tennis, MLB games) are captured **deliberately as instrument controls** — if they don't read toxic, the tool is broken, not the market benign.
+- **The verdict** (`ml/lp/edge_verdict.py`): per family, day-block bootstrap CIs, split-half stability, multiple-comparison caveats → `FLOW-TOXIC / FLOW-BENIGN / INCONCLUSIVE / INSUFFICIENT`. Benign flow gates real capital; realized capture on our own fills — same discipline — delivers the final answer.
 
-1. **The market is the benchmark, and it's good.** Kalshi's implied probability scores log loss 0.659 over ~6,100 settled windows and is near-perfectly calibrated (ECE 0.5%). Any model must beat *that*, not a coin flip.
-2. **The first "edge" was a leak.** An early model "beat" the market — because the feature set quietly included the market's own price. Excluding all market-derived columns, a walk-forward logistic on pure BTC price/vol features **ties** the market (0.655 vs 0.662). Fancier models don't help: LightGBM is worse and miscalibrated.
-3. **A +8% backtest survived five leak-hunts…** The cost-aware backtest (real spreads, Kalshi's fee formula, bet only when the model clears the ask) showed +8% ROI, robust to 3× spread, with every no-skill control losing money.
-4. **…so we tested it against reality.** A collector banked the live executable order book at the decision minute. Verdict: the backtest price was real and hittable (slippage unbiased), **but the book reprices ~0.19c/s, tracking BTC spot at R²=0.92** — the edge is a *latency-bound lead-lag artifact* the size of the friction protecting it. Measured end-to-end decision→order latency (~0.6s) is 50× inside the breakeven, but capturing the edge means winning a repricing race against co-located market makers — the wall is competition, not wiring.
-5. **Every alternative angle is null, and each null is measured, not assumed:** model class, Deribit funding, Binance order flow (53M trades), favorite-longshot bias, settlement-lag at minute resolution, threshold-ladder arbitrage, options-implied direction (structurally null — options price vol, not 15-min direction), market-making (the fee alone exceeds the half-spread), and less-liquid markets — where the best insight of the project lives: **HYPE's 15-min market is measurably *inefficient* (priced like a coin flip), but its 9c spread scales *with* the inefficiency, trapping it.** Markets are efficient exactly to the limits of arbitrage.
-6. **The final test killed the last survivor.** A per-minute sweep had flagged a W+9–13 decision-minute "profit cluster" (~+5–7%, with the honest caveat that day-block bootstrap CIs were ±3–4% and the ranking was split-half unstable). An AWS Lambda collector then banked live books at that minute 24/7 for a week: on **650 fresh out-of-sample windows, the cluster loses −3.7% [−6.5%, −1.4%] at its own assumed prices**, and execution there is a wash (+0.1% paired cost). It wasn't even an execution artifact — it was in-period selection noise, exactly what the uncertainty analysis had warned. The near-expiry book is also 83% empty: nothing to trade against even if a signal existed.
-
-Why this is the portfolio centerpiece rather than a failure: every number above required the platform — PIT-correct features (so the ties are real ties, not leaks), incremental marts (so 70 days × 96 windows × 4 sources stay joinable), serverless collection (the live books are the one irreproducible dataset; the Lambda kept capturing while the laptop slept), and a harness that prices every claim in dollars with controls and day-block confidence intervals. The deliverable is a platform that can tell microstructure from alpha — and a researcher who kills his own result.
-
----
-
-**The Stack**
-
-- **Ingestion:** Python (httpx, stdlib-only inside Lambda) pulling Coinbase Exchange OHLCV, Kalshi market data (public, read-only), Deribit funding, and Binance Vision aggTrade archives; watermark-driven incremental loads, idempotent day-partition overwrites
-- **Collection (serverless):** AWS Lambda + EventBridge cron + CloudFormation — live order-book snapshots at chosen decision minutes, 24/7, dependency-free deploy zip
-- **Warehouse:** Amazon Athena (serverless, pay-per-scan) querying S3 Parquet in place via the Glue Data Catalog — a lakehouse, not a load-and-store warehouse
-- **Transformation:** dbt Core (`dbt-athena`) — incremental models mandatory at minute granularity; marts materialize as Iceberg tables for clean incremental `MERGE`. This is the centerpiece
-- **Orchestration:** Airflow (Astro Runtime 3 / Airflow 3, Docker) locally + GitHub Actions cron for the unattended daily pipeline
-- **ML / research:** scikit-learn + LightGBM, walk-forward only, with a cost model (real spreads + Kalshi fee), no-skill controls, day-block bootstrap CIs, and live-execution reconciliation
-- **CI:** GitHub Actions via OIDC federation (no stored AWS keys): `pytest` + `dbt build` against the real warehouse on every push
-- **Visualization (next):** Streamlit dashboard of the features, the experiments, and the honest arc
+**Current status: the machine is collecting.** Either outcome completes the project honestly — a confirmed edge gets scaled onto the multi-market WebSocket infrastructure already built for it; a null gets written up like the seventeen before it.
 
 ---
 
 **The Architecture**
 
 ```
-Coinbase OHLCV     Kalshi 15-min markets     Deribit funding     Binance aggTrades (53M)
-      ↓                    ↓                       ↓                      ↓
-            Python ingestion (incremental, watermark-driven, rate-limited)
-                                      ↓
-        AWS S3 raw zone (Parquet, dt-partitioned)  ←──  AWS Lambda collector
-                                      ↓                  (EventBridge 24/7:
-        Athena + Glue Data Catalog (queried in place)    live order book + spot
-                                      ↓                   at decision minutes)
-        dbt: staging → intermediate → marts
-            ├── fct_features_pit        — point-in-time feature store (CROWN JEWEL)
-            ├── fct_kalshi_15min_label  — forward label, kept OUT of the PIT store
-            └── fct_btc_15min_training  — features ⋈ market quote ⋈ label, PIT-safe
-                                      ↓
-        ml/ research harness
-            ├── benchmark_eda · train_baseline · backtest (cost-aware, controls)
-            ├── live_exec_reconcile · live_paper_pnl · live_cluster_verdict
-            └── settlement_lag · decision_minute_profit · favorite_longshot · …
-                                      ↓
-        [next] Streamlit dashboard
+ Coinbase · Kalshi history · Deribit · Binance (53M)      Kalshi UNIVERSE (daily)      In-play WS capture (game windows)
+                    ↓                                            ↓                            ↓
+              Python ingestion (incremental, idempotent day-partition Parquet)   ←   AWS Lambda collector (24/7)
+                                                     ↓
+                         S3 raw zone  →  Glue Data Catalog  →  Athena (queried in place)
+                                                     ↓
+                 dbt: 6 staging → 2 intermediate → 8 marts   (~80 tests, PIT singular test)
+                     ├── fct_features_pit          — point-in-time feature store (Iceberg MERGE)
+                     ├── fct_kalshi_opportunity    — the whole-exchange opportunity radar
+                     ├── fct_ws_markout            — flow → 30s-forward price label (toxicity)
+                     ├── fct_toxicity_by_family    — the per-family/day toxicity scoreboard
+                     └── fct_lp_market_session/daily — the bot's real-money P&L, decomposed
+                              ↓                                   ↓
+              Streamlit Opportunity Radar             ml/lp/edge_verdict.py  (day-block CIs)
+                              ↓                                   ↓
+                    ml/lp/lp_live.py — the live maker (REST + WebSocket book/fills, kill switches)
 
-Orchestration: Airflow DAG (local demo) + GitHub Actions cron (unattended daily
-ingest → dbt build) + CI (pytest + dbt build on every push, OIDC, no stored keys)
+ Orchestration: GitHub Actions (CI on push · daily pipeline cron · game-window capture cron; OIDC, no stored keys)
+                + Airflow DAG (local showcase) + Lambda/EventBridge (serverless collection)
 ```
 
 ---
 
-**dbt — The Centerpiece**
+**dbt — the centerpiece**
 
-At minute granularity, dbt stops being "SQL with templates" and starts being a serious data modeling tool.
+- `staging/` (6) — one view per raw source: type-casts, dedupes, derived quote fields
+- `intermediate/` (2) — per-source feature computation
+- `marts/` (8) — the business layer: the PIT feature store (incremental Iceberg MERGE), the training mart, the opportunity radar, the markout/toxicity pair, and the live bot's P&L decomposition (`net = capture + residual − fees`)
 
-**Model layers:**
-- `staging/` — one model per source table, light cleaning only: type-casts, dedupes on `(asset_id, event_at)`
-- `intermediate/` — feature computation per source (returns, rolling realized volatility, RSI, Bollinger positions, Kalshi implied-prob at the decision minute)
-- `marts/` — `fct_features_pit` joins sources at minute granularity with point-in-time correctness; `fct_btc_15min_training` adds the market quote and forward label for the ML layer
-
-**Incremental models are mandatory.** Full refreshes on millions of rows are wasteful and slow. Marts use `materialized='incremental'` on Iceberg with `unique_key` MERGE semantics and an `is_incremental()` watermark; backfills stay deterministic via `--full-refresh`.
-
-**Point-in-time correctness — the crown jewel.** `fct_features_pit` guarantees that the row at timestamp T contains only information knowable at T. A custom dbt **singular test** proves it: recompute a sample row's features from raw data using only `event_at <= T` and assert equality (demonstrated to fail under look-ahead). This guarantee is why the ML results above can be trusted — when the model *tied* the market, that was real, and when it "won," the PIT discipline is what exposed the leak.
-
-**Tests:** schema tests (`not_null`, `unique`, `accepted_values`, `relationships`) on every model, the PIT singular test, and physical-sanity singular tests (no negative volumes, high ≥ low, no future timestamps). All run in CI against the real warehouse on every push.
+**Point-in-time correctness is the crown jewel** — `fct_features_pit` guarantees row-at-T uses only data knowable at T, *proven* by a custom singular test that recomputes features from raw backward-looking data and asserts equality. This discipline caught the leaked market price behind the project's first fake "edge," and it is why every tie and every null above can be trusted. ~80 schema/range/uniqueness tests run against the real warehouse in CI on every push.
 
 ---
 
-**Orchestration — two layers, deliberately**
+**Orchestration — deliberately layered**
 
-- **Airflow (`airflow/`, Astro Runtime 3):** the `crypto_price_ingest` DAG demonstrates TaskFlow + dynamic task mapping over the product list, running locally under Docker. It is the orchestration *showcase*.
-- **GitHub Actions cron (`.github/workflows/pipeline.yml`):** the unattended *production path* — daily Coinbase + Kalshi ingest followed by `dbt build`, authenticated via OIDC into the same scoped role as CI. Both ingests are idempotent day-overwrites, so reruns and catch-ups are safe by construction. This exists because the honest lesson of running the project was that a laptop is not an orchestrator: the serverless collector kept capturing while the local Airflow stack was off.
-
-The quality gate is preserved in both paths: `dbt build` runs models *and* tests together — a test failure fails the run before anything downstream consumes bad data.
+- **GitHub Actions** is the production path: CI (`pytest` + full `dbt build` vs Athena on every push), the daily 02:30 UTC pipeline (all ingests + `dbt build`), and the game-window capture cron (19/23/02 UTC; re-exchanges its OIDC token before landing because captures outlive the 1-hour session). All via OIDC federation — no stored AWS keys.
+- **Airflow** (Astro Runtime 3) remains as the orchestration showcase; the honest lesson stands: a laptop is not an orchestrator, and the serverless paths kept collecting while it slept.
 
 ---
 
-**What To Say In An Interview**
+**What to say in an interview**
 
-*"Walk me through your dbt project structure."*
-Staging → intermediate → marts. Staging dedupes and type-casts per source. Intermediate computes features per source. Marts are business-facing: `fct_features_pit` joins price features at minute granularity with point-in-time correctness, and `fct_btc_15min_training` adds the Kalshi quote and the forward label — with the label kept out of the PIT store by design.
+*"Walk me through the platform."*
+Four sources plus two live capture systems land idempotent Parquet in S3; Athena queries it in place through Glue; dbt models it in three layers with ~80 tests including a custom point-in-time proof; GitHub Actions runs CI against the real warehouse and two scheduled data pipelines with OIDC; a Streamlit dashboard serves the ranked output; and a live trading bot both consumes the answers and generates the ground-truth P&L data that feeds back in.
 
-*"What does 'point-in-time correct' actually mean?"*
-The feature row at timestamp T uses only data with `event_at <= T`. No look-ahead. A custom dbt singular test proves it by recomputing a sample row from raw data and asserting equality. Without this, a time-series model is lying to itself — and in this project the discipline paid for itself by catching a leaked market price that had produced a fake "edge."
+*"What does 'point-in-time correct' mean and why care?"*
+The feature row at T uses only `event_at <= T`, proven by a singular test that fails under look-ahead. It caught a leaked market price that had produced a fake edge — the difference between a model that ties the market and one that lies to itself.
 
-*"Why incremental models?"*
-At minute granularity a year of data is millions of rows, growing daily. Incremental Iceberg models with MERGE semantics process only new bars; backfills stay deterministic via `--full-refresh`.
+*"How did the ML perform?"*
+The honest answer is the best part: a leak-free walk-forward model *ties* the market. A +8% backtest survived five leak-hunts, so I captured live order books and proved it was a latency artifact — the book reprices with spot at R²=0.92 before an order fills. ~17 hypotheses total, each measured to a verdict. The market is efficient to the limits of arbitrage, and I can show where the friction sits, in cents.
 
-*"What happens if a dbt test fails?"*
-`dbt build` interleaves run and test, so a failure halts the build before downstream models or any consumer sees bad data — in CI, in the scheduled pipeline, and in the DAG design.
+*"So why market-making, and how do you know if that edge is real?"*
+Because every *taking* strategy was null, and the one structurally different role — providing liquidity into mean-reverting retail books — made real money in a live test. Whether it's durable is being decided by a measurement funnel: a daily whole-exchange screen finds where spreads and volume live; an in-play capture labels each market's flow with 30-second-forward markout (with known-toxic families captured as instrument controls); and a verdict script applies day-block bootstrap CIs — days are the resampling unit, not fills — before any capital scales. Benign flow is necessary, not sufficient: the final judge is realized capture on our own fills.
 
-*"How does the model perform?"*
-[The honest answer, and the best conversation in the project.] A leakage-free walk-forward logistic *ties* the market's log loss (0.655 vs 0.662). A cost-aware backtest showed +8% ROI that survived five leak-hunts — so I collected live order books and showed it's a latency-bound lead-lag artifact: the book reprices with spot at R²=0.92 before a bet can fill. A second live campaign (AWS Lambda, 650 windows) killed the last candidate edge as in-period selection noise: −3.7% out-of-period at its own assumed prices. Roughly ten angles, all null, each one *measured*. The market is efficient to the limits of arbitrage — I can show exactly where the friction sits, in cents.
-
-*"Why Athena over Snowflake/Redshift?"*
-It's a lakehouse: the Parquet in S3 is the single source of truth and Athena queries it in place — no load step, no idle compute. Partition projection prunes scans; pay-per-scan is near-zero at this volume; and the same S3 Parquet stays readable by Spark for the tick-data work (the 53M-trade Binance aggregation). Conscious trade-off: dbt incremental models need Iceberg on Athena for clean MERGE — slightly more setup than Snowflake, documented.
-
-*"What would you do differently in true production?"*
-Secrets via Vault, not env files. A feature store (Feast) for low-latency serving. Row-count anomaly detection on each load. Schema contracts. Model monitoring for drift. Separate dev/staging/prod warehouses.
+*"Why Athena over Snowflake?"*
+Lakehouse: S3 Parquet is the single source of truth, queried in place, pay-per-scan, near-zero idle cost at this volume; Iceberg gives dbt clean incremental MERGE. Trade-off documented and conscious.
 
 ---
 
-**How To Frame It On Your Resume**
+**Resume framing** (everything below exists in this repo today)
 
-> **Only claim what is built and verified.** Everything below exists in this repo today.
-
-- Built an incremental ELT lakehouse on AWS: Python ingestion of four market-data sources (Coinbase OHLCV, Kalshi prediction markets, Deribit funding, Binance tick archives — 53M trades) into an S3 Parquet raw zone, queried in place by Athena via Glue — no load step
-- Designed a dbt-athena medallion layer whose feature mart materializes as an **incremental Iceberg table with MERGE upserts**; engineered a point-in-time-correct feature store and **proved it with a custom dbt singular test** (recomputes features from raw using only backward-looking data; demonstrated to fail under look-ahead)
-- Stood up **GitHub Actions CI and a scheduled cloud pipeline** (daily ingest → `dbt build`) authenticating via **OIDC federation** into a scoped IAM role — no long-lived AWS keys; orchestrated ingestion with an **Airflow DAG** (Astro Runtime 3, dynamic task mapping)
-- Deployed a **dependency-free AWS Lambda collector** (CloudFormation + EventBridge) capturing live order books 24/7 at ~$0/month — the project's one irreproducible dataset
-- Built a **walk-forward, cost-aware ML research harness** (real spreads + fees, no-skill controls, day-block bootstrap CIs, unit-tested money math) benchmarked against a real prediction market, and used it plus **two live-execution campaigns** to prove an apparent +8% backtest edge was a latency-bound microstructure artifact — and a candidate decision-minute cluster was selection noise — across ~10 independently tested angles
-
-*Add once built:* Streamlit dashboard.
+- Built an incremental ELT lakehouse on AWS: 6 market-data pipelines (4 historical sources incl. a 53M-trade tick aggregation + a daily whole-exchange snapshot + a live WebSocket microstructure capture) landing idempotent Parquet in S3, queried in place by Athena/Glue
+- Designed a 16-model dbt medallion with an **incremental Iceberg MERGE feature store proven point-in-time-correct by a custom singular test**; ~80 tests run against the production warehouse in CI on every push
+- Stood up **three GitHub Actions pipelines (CI, daily ELT, scheduled capture) via OIDC federation** — no long-lived AWS keys — plus an Airflow DAG and a dependency-free AWS Lambda/EventBridge collector (~$0/mo)
+- Built and operated a **live market-making bot (real money)** on Kalshi with staged safety controls, WebSocket order-book/fill feeds, and per-fill markout logging feeding the warehouse
+- Ran a **walk-forward, cost-aware research program** (~17 edge hypotheses; day-block bootstrap CIs, no-skill controls, live-execution reconciliation) that correctly killed every false edge — including a +8% backtest exposed as a latency artifact via live order-book capture — and productionized the measurement funnel (opportunity radar → flow-toxicity labeling with instrument controls → statistical verdict) now deciding the surviving one
+- Shipped the serving layer: a **Streamlit opportunity-radar dashboard** over the dbt marts, offline-first and deployable without warehouse credentials
 
 ---
 
@@ -161,12 +153,17 @@ Secrets via Vault, not env files. A feature store (Feast) for low-latency servin
 
 | Path | What's in it |
 |---|---|
-| `ingestion/` | Source clients + backfill CLIs (Coinbase, Kalshi, Deribit, Binance Vision) and S3 writers |
-| `lambda/orderbook_collector/` | The serverless live-book collector (handler + CloudFormation template) |
-| `dbt/` | Staging/intermediate/mart models, schema + PIT tests |
-| `airflow/` | Astro project with the `crypto_price_ingest` DAG |
-| `ml/` | The research harness — one question per script, shared math in `backtest.py`/`model.py`/`data.py` |
-| `tests/` | Unit tests pinning the money math and walk-forward leakage guarantees |
+| `ingestion/` | Source clients + backfill CLIs + S3 writers (incl. `kalshi_universe`, `ws_feature_storage`, `lp_storage`) |
+| `lambda/orderbook_collector/` | Serverless live-book collector (handler + CloudFormation) |
+| `dbt/` | 16 models in 3 layers, schema + PIT tests |
+| `dashboard/` | The Streamlit Opportunity Radar (`app.py`) + Athena snapshot publisher |
+| `airflow/` | Astro project, `crypto_price_ingest` DAG |
+| `ml/lp/` | **The active track**: live maker, screens, WS feeds/capture, `edge_verdict.py` |
+| `ml/alpha/` | The closed BTC hunt (benchmark → backtest → live verdicts) |
+| `ml/research/`, `ml/weather/` | Closed side-tracks, kept for the record (tennis, Polymarket, weather, cross-venue) |
+| `tests/` | 54 unit tests: money math, walk-forward leakage, storage contracts, feed parsing |
 | `scripts/` | Healthchecks, latency measurement, Lambda deploy |
-| `docs/devlog.md` | The full day-by-day record: every experiment, result, and dead end |
-| `docs/setup/` | One-time infra setup runbooks (Athena, OIDC, Kalshi, Lambda) |
+| `docs/devlog.md` | The full record — 24 entries, every experiment and dead end |
+| `docs/setup/` | 10 infra runbooks (Athena, OIDC, Lambda, LP pipeline, universe snapshot, WS capture) |
+
+**Run the dashboard:** `uv sync --group dashboard && uv run --group dashboard streamlit run dashboard/app.py`
