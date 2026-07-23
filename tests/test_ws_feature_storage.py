@@ -4,6 +4,7 @@ Parquet schema contract, without touching AWS (a fake S3 captures put_object).""
 from __future__ import annotations
 
 import io
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -45,23 +46,45 @@ def test_write_partitioned_by_utc_day(tmp_path: Any, monkeypatch: Any) -> None:
     monkeypatch.setenv("S3_BUCKET", "test-bucket")
     df = wfs.load_features(_csv(tmp_path))
     fake = FakeS3()
-    n = wfs.write_features(df, s3_client=fake)
+    landed = datetime(2026, 7, 19, 3, 15, 42, tzinfo=UTC)
+    n = wfs.write_features(df, s3_client=fake, ingested_at=landed)
     assert n == 2  # two distinct UTC days
     keys = sorted(p["Key"] for p in fake.puts)
+    # filename carries the LANDING time: same-day captures accumulate, never clobber
     assert keys == [
-        "raw/ws_features/dt=2026-07-18/features.parquet",
-        "raw/ws_features/dt=2026-07-19/features.parquet",
+        "raw/ws_features/dt=2026-07-18/features-031542.parquet",
+        "raw/ws_features/dt=2026-07-19/features-031542.parquet",
     ]
     table = pq.read_table(io.BytesIO(fake.puts[0]["Body"]))
     assert table.schema.equals(wfs.FEATURES_SCHEMA)
     assert table.column("ingested_at")[0].as_py() is not None
 
 
+def test_second_landing_same_day_does_not_clobber(tmp_path: Any, monkeypatch: Any) -> None:
+    monkeypatch.setenv("S3_BUCKET", "test-bucket")
+    df = wfs.load_features(_csv(tmp_path))
+    fake = FakeS3()
+    wfs.write_features(df, s3_client=fake, ingested_at=datetime(2026, 7, 19, 1, 0, tzinfo=UTC))
+    wfs.write_features(df, s3_client=fake, ingested_at=datetime(2026, 7, 19, 4, 0, tzinfo=UTC))
+    day_keys = {p["Key"] for p in fake.puts if "dt=2026-07-18" in p["Key"]}
+    assert len(day_keys) == 2  # two distinct objects for the same dt partition
+
+
 def test_write_local_dir(tmp_path: Any) -> None:
     df = wfs.load_features(_csv(tmp_path))
     fake = FakeS3()
-    n = wfs.write_features(df, s3_client=fake, local_dir=str(tmp_path / "wh"))
+    landed = datetime(2026, 7, 19, 3, 15, 42, tzinfo=UTC)
+    n = wfs.write_features(df, s3_client=fake, local_dir=str(tmp_path / "wh"), ingested_at=landed)
     assert n == 2 and fake.puts == []  # local path never touches S3
-    out = Path(tmp_path) / "wh" / "raw/ws_features/dt=2026-07-18/features.parquet"
+    out = Path(tmp_path) / "wh" / "raw/ws_features/dt=2026-07-18/features-031542.parquet"
     assert out.exists()
     assert pq.read_table(io.BytesIO(out.read_bytes())).schema.equals(wfs.FEATURES_SCHEMA)
+
+
+def test_ingest_idle_window_is_a_green_noop(tmp_path: Any, monkeypatch: Any) -> None:
+    """An idle capture (no live markets) writes no CSV — landing must succeed as a no-op,
+    not crash the workflow red with FileNotFoundError."""
+    monkeypatch.setenv("S3_BUCKET", "test-bucket")
+    fake = FakeS3()
+    n = wfs.ingest(s3_client=fake, path=str(tmp_path / "does_not_exist.csv"))
+    assert n == 0 and fake.puts == []

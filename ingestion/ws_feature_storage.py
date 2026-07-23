@@ -2,14 +2,19 @@
 
 Layout::
 
-    s3://<bucket>/raw/ws_features/dt=YYYY-MM-DD/features.parquet
+    s3://<bucket>/raw/ws_features/dt=YYYY-MM-DD/features-HHMMSS.parquet
 
 ``ml/lp/ws_features.py`` captures, per market per snapshot, the pre-quote microstructure
 features (book shape + imbalance, trade flow, mid vol/drift) to ``data/ws_features.csv``.
 This lifts that CSV into the same raw zone the rest of the platform uses, partitioned by the
 UTC date of the snapshot. ``dt`` lives in the S3 key (Hive-style), not the Parquet columns —
-Athena derives it via partition projection. One file per ``dt``, overwritten on re-run, so
-re-ingests are idempotent.
+Athena derives it via partition projection.
+
+UNLIKE the once-a-day datasets, several captures land per day (game-window crons), so the
+filename carries the landing time: a fixed name would make each capture OVERWRITE the day's
+previous one (which is exactly what happened to the first two green runs). Duplicate rows
+from re-landing the same CSV are harmless — ``stg_ws_features`` dedupes on
+``(market_ticker, snapshot_at)`` keeping the latest ``ingested_at``.
 
 ``FEATURES_SCHEMA`` is the explicit contract with the Glue external-table DDL
 (``docs/setup/09-ws-capture.md``) — keep the column order + types in sync by hand. This is the
@@ -114,9 +119,10 @@ def write_features(
         bucket = _require_bucket()
 
     written = 0
+    stamp = ingested_at.strftime("%H%M%S")  # landing time: same-day captures must not clobber
     for day, day_df in df.groupby(df["snapshot_at"].dt.date):
         table = _to_table(day_df, ingested_at)
-        rel = f"{RAW_PREFIX}/dt={day.isoformat()}/features.parquet"
+        rel = f"{RAW_PREFIX}/dt={day.isoformat()}/features-{stamp}.parquet"
         if local_dir is not None:
             out = Path(local_dir) / rel
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -134,6 +140,11 @@ def write_features(
 def ingest(
     *, s3_client: S3Client | None = None, local_dir: str | None = None, path: str = FEATURES_CSV
 ) -> int:
+    if not Path(path).exists():
+        # An idle capture window (no live eligible markets) writes no CSV — that is a
+        # normal outcome for a fixed cron, not an error; the landing step must stay green.
+        logger.info("no capture file at %s — idle window, nothing to land", path)
+        return 0
     return write_features(load_features(path), s3_client=s3_client, local_dir=local_dir)
 
 

@@ -13,7 +13,11 @@
 --     target: model prob vs kalshi_implied_prob (the benchmark), apples to apples.
 --
 -- NOTE: here event_at (from fct_features_pit) IS the decision minute (~W+1), not W.
--- Inner joins drop the rare window missing a Coinbase bar at decision_at (~0.7%).
+-- Inner joins drop the rare window missing a Coinbase bar at decision_at (~0.7%), and the
+-- final WHERE drops windows whose decision-minute Kalshi candle exists but carries no
+-- price (no trades that minute -> null implied prob). Both are unusable for the benchmark
+-- by definition (there is no market quote to compare against); the mart's not_null test
+-- on kalshi_implied_prob GUARDS this contract rather than tolerating nulls.
 --
 -- View (overrides the marts incremental default): small, always-fresh derivation.
 -- The ML session can UNLOAD it to S3 Parquet for SageMaker / snapshot as needed.
@@ -43,3 +47,4 @@ join decision d
 join {{ ref('fct_features_pit') }} f
     on f.asset_id = 'BTC-USD'
    and f.event_at = d.decision_at
+where f.kalshi_implied_prob is not null   -- no quote at the decision minute = not trainable
