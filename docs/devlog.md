@@ -4,6 +4,45 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-07-24 — CHECKPOINT: platform complete + collecting; adversarial design review; Step 1 ground-truth downgrades the surviving edge
+
+Consolidated state for a fresh start. The build era is over — every layer of the "full Kalshi platform" exists, is committed to `main`, and runs. This session: shipped the last pieces, ran a 5-lens adversarial review of the whole edge-decision architecture, and did Step 1 of the resulting plan (validate the toxicity instrument) — which delivered the most important finding since the WC.
+
+**What got built + fixed (all on `main`, pushed):**
+- **`ml/lp/lp_live.py` `--ws` maker bug fixed** — the private `fill` channel was market-scoped, so it went silent after a market roll; now account-wide. Fee made REST-authoritative.
+- **Auto-logger live**: `ml/lp/ws_features.py` (in-play microstructure, `--wide` keeps ITF/GAME as toxic controls) → `ingestion/ws_feature_storage.py` → dbt `stg_ws_features` → `fct_ws_markout` → `fct_toxicity_by_family`; scheduled by `.github/workflows/ws-capture.yml`. `ml/lp/edge_verdict.py` is the verdict script.
+- **README rewritten** to the true three-act arc (`96f3784`); **club-soccer prefixes** added to `BENIGN_PREFIXES`.
+- **Three production reds fixed**: OIDC token expiring mid-90-min-capture (re-exchange before landing); same-day capture clobber (fixed `features.parquet` → `features-HHMMSS.parquet` + staging dedup); null-quote windows failing the training mart's not_null test (filter them, test stays as contract guard). Full `dbt build` vs Athena PASS=100.
+- **First real capture data landed**: ~51k labeled snapshots / 95 markets / 61 games on the 07-22 windows.
+
+**The adversarial design review (5 independent lenses over the real code).** Verdict: measurement is honest, but as an AUTONOMOUS edge-gate the system is not yet valid. Findings that matter, by theme:
+- *Construct validity (the deepest):* `fct_ws_markout`'s label signs the NEXT 30s mid-move by the TRAILING 60s net flow — that is flow-MOMENTUM, not fill-synchronous adverse selection, and it is BLIND to news/jump toxicity (goals, tennis points) — the exact channel that made basketball/baseball losers. A book can read FLOW-BENIGN while a maker bleeds to jumps. This also mis-specifies the ITF control (benign read may be the label correctly saying "flow doesn't lead price" while the maker still gets picked off by point jumps).
+- *Open loop, fail-OPEN:* `edge_verdict` prints to stdout; the bot trades a hardcoded `BENIGN_PREFIXES` (still lists MLB/NBA/WNBA/ATP — families we MEASURED toxic) that nothing reconciles against the verdict. Unmeasured families are quotable by default. The planned unattended deploy would quote the busiest MLB total.
+- *Broken sufficiency gate:* `fct_lp_market_session`'s sport CASE predates club soccer → every MLS/LigaMX/Brasileirao fill collapses to `sport='OTHER'`, never joins its verdict → the "realized capture > 0" check silently no-ops for exactly the post-WC hypothesis families.
+- *Inference:* UTC (not ET) `capture_day` splits one US-evening slate across midnight into two "independent" bootstrap days (narrows CI); `n_flow_obs`-weighting re-imports within-day pseudo-replication (one big day dominates); n=5-day percentile bootstrap undercovers; split-half at n=5 is a coin flip.
+- *Ops:* a silently-empty capture is indistinguishable from an idle window (the green no-op masks failure); fixed 3×90-min UTC crons can't track fixtures and confound time-of-day; `cap=40` + last-1000-trades discovery lets a heavy-tennis night crowd soccer out to zero.
+- *Cost:* `fct_ws_markout` is a full-rebuild `table` self-joining ALL history nightly → breaches the 1GB Athena scan cap ~Oct–Nov, which fails the whole nightly build.
+
+**Step 1 — validate the instrument (`ml/lp/realized_toxicity.py`, committed `d360f8d`).** The public-vs-private correlation is NOT yet possible (public capture began 07-22; our fills are 06-16..27 — no overlap; that needs a live pilot overlapping the capture). So Step 1 established the GROUND TRUTH the public metric must reproduce: realized 30s fill-markout per family from our 15,829 WC fills (fill-anchored, contemporaneously-signed = the metric the review said is correct), soccer-aware classifier, ET-day-block bootstrap, unweighted-per-day primary. **RESULT — the surviving edge is weaker than believed:**
+- **WC/SPREAD markout −0.135c, CI [−0.28, −0.03] — entirely below zero** (12 days, 6,494 fills) = statistically-significant MILD adverse selection. WC/TOTAL −0.086c [−0.28, +0.11] inconclusive.
+- Controls validate the sign: MLB/SPREAD −0.79, MLB/TOTAL −0.69, WNBA/SPREAD −1.10, all significantly toxic.
+- **Reframe:** WC soccer was net-profitable because the wide spread capture (~+0.59c/fill) EXCEEDED mild toxicity — NOT because flow was benign. The old "benign, markout~0" claim was looser analysis without day-block family CIs.
+- **Implication:** the post-WC club-soccer hypothesis is now RISKIER — thinner club spreads (Liga MX near-money ~4c) may not cover the same ~−0.13c soccer toxicity tax + fees. The margin is `capture − adverse_selection − fees`, and adverse_selection is reliably >0 even for soccer.
+
+**FUTURE STEPS (reprioritized by the review; do in order):**
+0. **(proposed) Spread-vs-toxicity breakeven check** — per candidate league, what near-money spread covers the ~−0.13c soccer toxicity + fees? Decides which club leagues (if any) clear the bar BEFORE trading them. Cheap; may be the highest-leverage next move.
+1. Step 1 ✓ DONE (above).
+2. **Add a jump/news-toxicity axis** to `fct_ws_markout` — flow-independent (e.g. E[|mid move| | fill], or fraction of forward moves exceeding the half-spread); make the ITF/GAME controls pass on THAT. The current flow-signed label can't see the dominant sports pick-off.
+3. **Close the verdict→bot loop, fail-CLOSED**: `edge_verdict --emit quotable_families.json`; bot refuses any family not freshly FLOW-BENIGN; ONE shared ticker→(sport,market_type) classifier for both marts + the bot (`realized_toxicity.py`'s `sport()`/`market_type()` are the canonical draft) — fixes the club-soccer join bug at the source; rename `BENIGN_PREFIXES`→`ELIGIBLE_PREFIXES`.
+4. **Statistical hardening**: ET `capture_day`, unweighted per-day means, raise BENIGN floor to ~8–10 days, add a contradiction alarm (FLOW-BENIGN but our realized fills bleed → demote).
+5. **Ops**: freshness/empty-capture alarm + `if: always()` landing; dead-man's-switch for missed crons.
+6. **Cost (before ~Oct)**: make `fct_ws_markout` + `fct_toxicity_by_family` incremental / partition-filtered.
+7. **Public-vs-private correlation**: once a small live pilot overlaps the capture, correlate the public flow-metric against our realized fill-markout on the same market-time — the true instrument validation.
+
+**AWS ops note (this session's account review):** healthy + cheap. Two items: the BTC-era Lambda `kxbtc-orderbook-decision-minutes` still fires 12×/hr for a June-closed question (`aws events disable-rule --profile admin --name kxbtc-orderbook-decision-minutes` when ready); and no billing budget exists (a $10/mo alert is the one guardrail worth adding). IAM: `crypto-de-pipeline` (read-only pipeline), `crypto-de-deployer` (admin/DDL — keep), `derekkuang` (console). No stale key to delete.
+
+---
+
 ## 2026-07-20 — CI green: created the missing Glue tables + landed LP data (the flagged merge prerequisite)
 
 `ci.yml` runs `dbt build` against Athena on every push, and it was failing: `Table 'awsdatacatalog.crypto_raw.lp_fills'/'lp_sessions' does not exist` (the lp — and, on newer commits, ws_features — Glue tables were never created; the models select from them). This is exactly the prerequisite flagged in the 07-16→18 entry. Fixed properly (not patched): landed the real LP bot CSVs to S3 (`ingestion.lp_storage`, June 16-27, 12 partitions each), created `lp_sessions`+`lp_fills`+`ws_features` Glue tables (admin profile, DDL from docs/07+09), and ran the full `dbt build` vs Athena = **PASS=94, ERROR=0, SKIP=0**. `fct_lp_daily`/`fct_lp_market_session` are now LIVE with real data; `ws_features`/`fct_ws_markout` exist but empty until the auto-logger runs. Merge to main is now safe. Root coupling to remember: CI builds ALL models against the real warehouse on push, so create a new model's Glue source table BEFORE pushing the model.
