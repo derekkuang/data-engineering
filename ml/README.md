@@ -23,6 +23,17 @@ TOTAL/SPREAD markets.
   by-type / by-config breakdowns.
 - `lp_paper_pilot.py`, `lp_market_screen.py`, `lp_toxicity_screen.py` — earlier paper run
   + the 2-stage opportunity/toxicity screens (history).
+- **`realized_toxicity.py`** — GROUND TRUTH: realized per-family maker toxicity (30s fill-markout)
+  from our own 15,829 WC fills, soccer-aware classifier, ET-day-block bootstrap. The load-bearing
+  measurement the whole toxicity apparatus is validated against. Verdict: WC/SPREAD carries a mild
+  but REAL adverse-selection tax (−0.135c) — the edge is capture *exceeding* toxicity, not benign flow.
+- **`breakeven.py`** — STEP 0 go/no-go: does a candidate club league's near-money spread earn enough
+  CAPTURE to clear that toxicity tax + fees? Fits `net_per_fill = capture + markout` vs quoted spread
+  per market-type from the WC fills (day-block bootstrap), solves the breakeven spread, sign-checks on
+  the known-toxic controls, and places each club league (LIVE `soccer_screen` spreads; 07-15 snapshot
+  fallback) against the curve. Finding: spread width is NOT the binding constraint for club SPREAD
+  (breaks even ~1c); the real gate is capture-efficiency + toxicity TRANSFER → needs a live club capture.
+  Club TOTAL is marginal (WC/TOTAL itself barely cleared).
 - **`soccer_screen.py`** — does the WC market-making microstructure repeat in year-round club
   soccer (MLS/Brasileirão/Liga MX/Scandinavia)? Screens near-money TOTAL/SPREAD spread + volume
   vs the WC benchmark. First read: club near-money spreads ARE in-band (Liga MX widest ~4c); the
