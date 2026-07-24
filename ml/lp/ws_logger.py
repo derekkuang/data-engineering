@@ -35,7 +35,7 @@ from dotenv import load_dotenv
 from ingestion.kalshi import SERIES_BTC_15M, KalshiClient
 from ingestion.kalshi_ws import KalshiWS, rest_top_of_book
 from ml.lp.lp_gate import MIN_RECENT_TRADES, passes_gate
-from ml.lp.lp_pilot import BENIGN_PREFIXES, EXCLUDE, JUMPY, is_mean_reverting
+from ml.lp.lp_pilot import ELIGIBLE_PREFIXES, EXCLUDE, JUMPY, is_mean_reverting
 
 CHANNELS = ("orderbook_delta", "trade")
 BOOK_LOG = "data/ws_book.csv"
@@ -66,7 +66,7 @@ def discover_markets(
     are the labeled positive controls that validate the markout instrument and give the
     toxicity model its toxic class. Never widen the maker; only widen the capture."""
     trades = client.get("/markets/trades", params={"limit": 1000}).get("trades", [])
-    pfx = prefixes or BENIGN_PREFIXES
+    pfx = prefixes or ELIGIBLE_PREFIXES
     counts: Counter[str] = Counter()
     for t in trades:
         tk = t.get("ticker", "")

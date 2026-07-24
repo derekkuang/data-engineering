@@ -39,41 +39,12 @@ from typing import cast
 
 import numpy as np
 
+from ml.lp.classify import market_type, sport
+
 FILLS_CSV = "data/lp_fills.csv"
 ET = timezone(timedelta(hours=-4))  # EDT — the WC fills are all June; matches lp_analyze
 N_BOOT = 5000
 MIN_DAYS = 3  # fewer ET days than this = INSUFFICIENT, no CI
-
-
-def sport(ticker: str) -> str:
-    """Canonical sport family. Soccer-aware: the club leagues (MLS/LigaMX/Brasileirao/…) are the
-    post-WC primary hypothesis and MUST classify, not fall to OTHER (the mart bug review-found)."""
-    t = ticker.upper()
-    checks = [
-        ("WC", ("KXWC",)),
-        ("MLS", ("KXMLS",)), ("LIGAMX", ("KXLIGAMX",)), ("BRASILEIRO", ("KXBRASILEIRO",)),
-        ("SCANDI", ("KXALLSVENSKAN", "KXELITESERIEN", "KXDENSUPERLIGA")),
-        ("EPL", ("KXEPL",)), ("LALIGA", ("KXLALIGA",)), ("SERIEA", ("KXSERIEA",)),
-        ("BUNDESLIGA", ("KXBUNDESLIGA",)), ("LIGUE1", ("KXLIGUE1",)),
-        ("UCL_UEL", ("KXUCL", "KXUEL")),
-        ("SOCCER_OTHER", ("KXEREDIVISIE", "KXEFLCHAMPIONSHIP", "KXCOPADOBRASIL", "KXSAUDIPL")),
-        ("WNBA", ("KXWNBA",)), ("MLB", ("KXMLB",)), ("NCAA", ("KXNCAA",)),
-        ("NBA", ("KXNBA",)), ("NHL", ("KXNHL",)), ("NFL", ("KXNFL",)),
-        ("ATP", ("KXATP",)), ("ITF", ("KXITF",)), ("WTA", ("KXWTA",)),
-    ]
-    for name, prefixes in checks:
-        if any(t.startswith(p) for p in prefixes):
-            return name
-    return "OTHER"
-
-
-def market_type(ticker: str) -> str:
-    t = ticker.upper()
-    for token, name in [("TOTAL", "TOTAL"), ("SPREAD", "SPREAD"), ("MATCH", "MATCH"),
-                        ("WINNER", "WINNER"), ("GAME", "GAME")]:
-        if token in t:
-            return name
-    return "OTHER"
 
 
 def _et_day(ts_utc: str) -> str:

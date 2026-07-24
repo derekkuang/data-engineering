@@ -29,8 +29,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
+from datetime import UTC, datetime
 
 import numpy as np
 import numpy.typing as npt
@@ -55,9 +57,10 @@ where n_flow_obs > 0
 
 REALIZED_QUERY = """
 select sport, market_type,
-       count(distinct et_day)  as traded_days,
-       sum(n_fills)            as fills,
-       sum(spread_capture)     as capture_usd
+       count(distinct et_day)                             as traded_days,
+       sum(n_fills)                                       as fills,
+       sum(spread_capture)                                as capture_usd,
+       sum(mean_markout_c * n_fills) / nullif(sum(n_fills), 0) as realized_markout_c
 from crypto_marts.fct_lp_market_session
 group by sport, market_type
 """
@@ -98,10 +101,61 @@ def verdict_for(
     return "INCONCLUSIVE"
 
 
+def tier_for(verdict: str, capture_usd: float | None) -> str | None:
+    """Trading tier from the flow verdict + our OWN realized capture. Only FLOW-BENIGN
+    families are eligible; the realized column decides how far to trust them:
+      * CONFIRMED     — benign flow AND we made positive spread capture making it = quotable.
+      * CANDIDATE     — benign flow, never traded (no fills) = quote ONLY as a --pilot to
+                        gather the first realized evidence, hard-capped.
+      * CONTRADICTION — benign flow but our fills bled (capture <= 0) = do NOT quote; the
+                        flow label and the money disagree (the review's contradiction alarm).
+    Non-benign families return None (absent from the file = never quotable, fail-closed)."""
+    if verdict != "FLOW-BENIGN":
+        return None
+    if capture_usd is None:
+        return "CANDIDATE"
+    return "CONFIRMED" if capture_usd > 0 else "CONTRADICTION"
+
+
+def emit_quotable(rows: list[dict[str, object]], as_of_day: str, meta: dict[str, object],
+                  path: str) -> list[str]:
+    """Write the machine-readable verdict the bot reads (fail-CLOSED). Returns the CONFIRMED
+    families (the default-quotable allowlist). `as_of_day` is the freshness anchor: the bot
+    refuses the whole file if it is stale, so a dead capture pipeline can't leave families
+    quotable forever."""
+    families = {}
+    quotable: list[str] = []
+    for r in rows:
+        tier = r.get("tier")
+        if tier is None:
+            continue  # not benign -> omit entirely (absence = not quotable)
+        fam = str(r["family"])
+        families[fam] = {
+            "tier": tier, "verdict": r["verdict"], "markout_c": r["markout_c"],
+            "ci": r["ci_tuple"], "days": r["days"], "flow_obs": r["flow_obs"],
+            "realized_capture_usd": r["capture_usd"], "realized_markout_c": r["realized_markout_c"],
+        }
+        if tier == "CONFIRMED":
+            quotable.append(fam)
+    doc = {
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "as_of_capture_day": as_of_day,
+        **meta,
+        "quotable": sorted(quotable),
+        "families": families,
+    }
+    with open(path, "w") as fh:
+        json.dump(doc, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    return sorted(quotable)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Per-family maker-edge verdict from captured data")
     ap.add_argument("--min-days", type=int, default=MIN_DAYS)
     ap.add_argument("--min-flow-obs", type=int, default=MIN_FLOW_OBS)
+    ap.add_argument("--emit", metavar="PATH", default=None,
+                    help="write the machine-readable quotable_families.json the bot reads")
     args = ap.parse_args()
 
     load_dotenv()
@@ -131,24 +185,35 @@ def main() -> int:
         days, flow_obs = len(g), int(g["n_flow_obs"].sum())
         v = verdict_for(days, flow_obs, lo, hi, args.min_days, args.min_flow_obs)
         real = realized_by_fam.get((str(sport), str(mtype)))
+        capture_usd = float(real["capture_usd"]) if real is not None else None
+        realized_mk = (
+            round(float(real["realized_markout_c"]), 3)
+            if real is not None and pd.notna(real["realized_markout_c"]) else None
+        )
         rows.append({
             "family": f"{sport}/{mtype}",
             "days": days,
             "flow_obs": flow_obs,
-            "markout_c": point,
+            "markout_c": round(point, 3),
             "ci": f"[{lo:+.2f},{hi:+.2f}]",
+            "ci_tuple": [round(lo, 3), round(hi, 3)],
             "split_half": split_half_sign(means),
             "control": "CONTROL" if (str(sport), str(mtype)) in KNOWN_TOXIC else "",
-            "realized_$": f"{float(real['capture_usd']):+.0f}" if real is not None else "-",
+            "realized_$": f"{capture_usd:+.0f}" if capture_usd is not None else "-",
+            "capture_usd": None if capture_usd is None else round(capture_usd, 2),
+            "realized_markout_c": realized_mk,
+            "tier": tier_for(v, capture_usd),
             "verdict": v,
         })
 
     out = pd.DataFrame(rows).sort_values(["verdict", "markout_c"])
+    display_cols = ["family", "days", "flow_obs", "markout_c", "ci", "split_half",
+                    "control", "realized_$", "tier", "verdict"]
     print("=" * 100)
     print("EDGE VERDICT — flow-signed markout per family (day-block bootstrap 95% CI, cents)")
     print("  >0 = taker flow leads price = maker gets picked off. Controls MUST read toxic.")
     print("=" * 100)
-    print(out.to_string(index=False,
+    print(out[display_cols].fillna("-").to_string(index=False,
                         formatters={"markout_c": lambda x: f"{x:+.2f}"}))
 
     n_eval = int((out["verdict"] != "INSUFFICIENT").sum())
@@ -163,6 +228,18 @@ def main() -> int:
     print("\nFLOW-BENIGN is necessary, NOT sufficient: EDGE = benign flow + realized capture "
           "> 0 on our own fills (stage 2 = run the bot on benign families; judged in "
           "fct_lp_daily with the same day-block discipline).")
+
+    if args.emit:
+        as_of_day = str(pd.to_datetime(tox["capture_day"]).max().date())
+        meta = {"min_days": args.min_days, "min_flow_obs": args.min_flow_obs,
+                "benign_ci_hi": BENIGN_CI_HI}
+        quotable = emit_quotable(rows, as_of_day, meta, args.emit)
+        n_cand = sum(1 for r in rows if r.get("tier") == "CANDIDATE")
+        n_contra = sum(1 for r in rows if r.get("tier") == "CONTRADICTION")
+        print(f"\n→ wrote {args.emit} (as-of capture day {as_of_day}): "
+              f"{len(quotable)} CONFIRMED-quotable {quotable or '[]'}, "
+              f"{n_cand} CANDIDATE (pilot-only), {n_contra} CONTRADICTION (refused). "
+              "The bot reads this fail-CLOSED and refuses anything not freshly CONFIRMED.")
     return 0
 
 

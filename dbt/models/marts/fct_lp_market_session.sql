@@ -20,32 +20,12 @@ select
     cast(with_timezone(session_at, 'UTC') at time zone 'America/New_York' as date) as et_day,
     market_ticker,
 
-    -- Sport from the ticker prefix (prefix match is unambiguous: KXWNBA != KXNBA).
-    case
-        when market_ticker like 'KXWNBA%' then 'WNBA'
-        when market_ticker like 'KXWC%'   then 'WC'
-        when market_ticker like 'KXMLB%'  then 'MLB'
-        when market_ticker like 'KXNCAA%' then 'NCAA'
-        when market_ticker like 'KXNBA%'  then 'NBA'
-        when market_ticker like 'KXNHL%'  then 'NHL'
-        when market_ticker like 'KXNFL%'  then 'NFL'
-        when market_ticker like 'KXATP%'  then 'ATP'
-        when market_ticker like 'KXITF%'  then 'ITF'
-        when market_ticker like 'KXWTA%'  then 'WTA'
-        else 'OTHER'
-    end as sport,
-
-    -- Market structure. TOTAL/SPREAD are the mean-reverting allowlist; the rest are
-    -- directional (legacy data) and kept only so the breakdown can show why they lost.
-    case
-        when market_ticker like '%TOTAL%'   then 'TOTAL'
-        when market_ticker like '%SPREAD%'  then 'SPREAD'
-        when market_ticker like '%MATCH%'   then 'MATCH'
-        when market_ticker like '%WINNER%'  then 'WINNER'
-        when market_ticker like '%MENTION%' then 'MENTION'
-        when market_ticker like '%GAME%'    then 'GAME'
-        else 'OTHER'
-    end as market_type,
+    -- Sport + market structure from the CANONICAL shared classifier (ml/lp/classify.py ->
+    -- dbt/macros/classify.sql). Using the macro is what fixed the review's silent join bug:
+    -- club-soccer fills used to fall to sport='OTHER' here (the CASE lacked MLS/LigaMX/...),
+    -- so they never matched their capture-side verdict. Both marts now classify identically.
+    {{ classify_sport('market_ticker') }} as sport,
+    {{ classify_market_type('market_ticker') }} as market_type,
 
     minutes,
     n_fills,

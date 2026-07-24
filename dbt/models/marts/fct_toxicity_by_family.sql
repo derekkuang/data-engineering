@@ -27,44 +27,10 @@ labeled as (
         cast(snapshot_at as date) as capture_day,
         market_ticker,
 
-        case
-            when market_ticker like 'KXWC%'                                   then 'WC'
-            when market_ticker like 'KXMLS%'                                  then 'MLS'
-            when market_ticker like 'KXLIGAMX%'                               then 'LIGAMX'
-            when market_ticker like 'KXBRASILEIRO%'                           then 'BRASILEIRO'
-            when market_ticker like 'KXALLSVENSKAN%'
-              or market_ticker like 'KXELITESERIEN%'
-              or market_ticker like 'KXDENSUPERLIGA%'                         then 'SCANDI'
-            when market_ticker like 'KXEPL%'                                  then 'EPL'
-            when market_ticker like 'KXLALIGA%'                               then 'LALIGA'
-            when market_ticker like 'KXSERIEA%'                               then 'SERIEA'
-            when market_ticker like 'KXBUNDESLIGA%'                           then 'BUNDESLIGA'
-            when market_ticker like 'KXLIGUE1%'                               then 'LIGUE1'
-            when market_ticker like 'KXUCL%' or market_ticker like 'KXUEL%'   then 'UCL_UEL'
-            when market_ticker like 'KXEREDIVISIE%'
-              or market_ticker like 'KXEFLCHAMPIONSHIP%'
-              or market_ticker like 'KXCOPADOBRASIL%'
-              or market_ticker like 'KXSAUDIPL%'                              then 'SOCCER_OTHER'
-            when market_ticker like 'KXWNBA%'                                 then 'WNBA'
-            when market_ticker like 'KXMLB%'                                  then 'MLB'
-            when market_ticker like 'KXNCAA%'                                 then 'NCAA'
-            when market_ticker like 'KXNBA%'                                  then 'NBA'
-            when market_ticker like 'KXNHL%'                                  then 'NHL'
-            when market_ticker like 'KXNFL%'                                  then 'NFL'
-            when market_ticker like 'KXATP%'                                  then 'ATP'
-            when market_ticker like 'KXITF%'                                  then 'ITF'
-            when market_ticker like 'KXWTA%'                                  then 'WTA'
-            else 'OTHER'
-        end as sport,
-
-        case
-            when market_ticker like '%TOTAL%'   then 'TOTAL'
-            when market_ticker like '%SPREAD%'  then 'SPREAD'
-            when market_ticker like '%MATCH%'   then 'MATCH'
-            when market_ticker like '%WINNER%'  then 'WINNER'
-            when market_ticker like '%GAME%'    then 'GAME'
-            else 'OTHER'
-        end as market_type,
+        -- Canonical shared classifier (ml/lp/classify.py -> dbt/macros/classify.sql); the
+        -- LP-fills mart uses the SAME macro, so the two sides' families join by construction.
+        {{ classify_sport('market_ticker') }} as sport,
+        {{ classify_market_type('market_ticker') }} as market_type,
 
         spread_c,
         signed_flow_1m,

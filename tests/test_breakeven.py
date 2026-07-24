@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 
 from ml.lp.breakeven import _wls_line, fit_family, predict_net
-from ml.lp.realized_toxicity import market_type, sport
+from ml.lp.classify import market_type, sport
 
 
 def test_wls_line_recovers_known_slope() -> None:

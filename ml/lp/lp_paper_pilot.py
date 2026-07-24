@@ -45,7 +45,7 @@ from ingestion.kalshi import KalshiClient
 POLL_SECONDS = 4.0
 MARKOUT_HORIZONS = (15, 30, 60)  # seconds
 # Benign (retail/slow) series prefixes; EXCLUDE fast/efficient crypto + 15m/perp.
-BENIGN_PREFIXES = (
+ELIGIBLE_PREFIXES = (
     "KXMLB",
     "KXNCAA",
     "KXWNBA",
@@ -108,7 +108,7 @@ def pick_benign_ticker(client: KalshiClient) -> str | None:
         tk = t.get("ticker", "")
         if any(x in tk for x in EXCLUDE):
             continue
-        if any(tk.startswith(p) for p in BENIGN_PREFIXES):
+        if any(tk.startswith(p) for p in ELIGIBLE_PREFIXES):
             counts[tk] += 1
     for tk, _ in counts.most_common(25):
         book = client.get_market_orderbook(tk)

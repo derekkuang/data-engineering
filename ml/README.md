@@ -18,7 +18,16 @@ TOTAL/SPREAD markets.
   size test). Strategy ruleset stamped via `CONFIG_VERSION`.
 - **`lp_pilot.py`** — shared selection (`pick_smooth_ticker`, `better_market`) + risk caps
   + paper v2 simulator.
-- **`lp_gate.py`** — selection gate (toxic-type exclusion + recent-trade floor).
+- **`classify.py`** — THE canonical ticker→(sport, market_type) taxonomy, single source of
+  truth. Python callers import `sport()`/`market_type()`; the dbt marts use the macro it
+  GENERATES (`--emit-sql` → `dbt/macros/classify.sql`), so the LP-fills side and the capture
+  side classify identically (a parity test guards the two from drifting). Fixed the review's
+  silent join bug (club soccer used to fall to `OTHER` on the fills side only).
+- **`quotable.py`** — the fail-CLOSED family gate. Loads `quotable_families.json` (from
+  `edge_verdict --emit`) and answers "may the bot quote this ticker?": yes only for a freshly
+  CONFIRMED family, or an explicit `--pilot` override. Missing/stale file → refuse all.
+- **`lp_gate.py`** — selection gate (fail-closed family policy + toxic-type exclusion +
+  recent-trade floor); `passes_gate` is the ONE enforcement point both selection paths use.
 - **`lp_analyze.py`** — read `data/lp_sessions.csv` + `lp_fills.csv`: P&L, markout CI,
   by-type / by-config breakdowns.
 - `lp_paper_pilot.py`, `lp_market_screen.py`, `lp_toxicity_screen.py` — earlier paper run
@@ -42,7 +51,10 @@ TOTAL/SPREAD markets.
   captured flow-signed markout) + `fct_lp_market_session` (realized capture) and prints
   FLOW-TOXIC / FLOW-BENIGN / INCONCLUSIVE / INSUFFICIENT with day-block bootstrap CIs,
   split-half stability, known-toxic instrument controls (ITF/MLB-GAME must read toxic), and
-  the multiple-comparison caveat. FLOW-BENIGN gates stage 2 (live bot); it is not itself edge.
+  the multiple-comparison caveat. `--emit quotable_families.json` writes the machine-readable,
+  freshness-stamped verdict the bot reads fail-CLOSED: tiers each benign family CONFIRMED
+  (benign + realized capture>0 = quotable), CANDIDATE (benign, untraded = pilot-only), or
+  CONTRADICTION (benign flow but our fills bled = refused). Closes the verdict→bot loop.
 
 The **DE pipeline** for this bot's data lives outside `ml/`:
 `ingestion/lp_storage.py` → `dbt/models/{staging,marts}/*lp*` → `docs/setup/07-lp-pipeline.md`.

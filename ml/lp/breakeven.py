@@ -43,7 +43,8 @@ from typing import Any
 
 import numpy as np
 
-from ml.lp.realized_toxicity import _et_day, market_type, sport
+from ml.lp.classify import market_type, sport
+from ml.lp.realized_toxicity import _et_day
 
 FILLS_CSV = "data/lp_fills.csv"
 SESSIONS_CSV = "data/lp_sessions.csv"

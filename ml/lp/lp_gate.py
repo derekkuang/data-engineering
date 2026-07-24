@@ -27,7 +27,15 @@ import csv
 import random
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ml.lp.quotable import Quotable
+
+# The fail-CLOSED family gate. lp_live sets this at startup from quotable_families.json; while
+# it is None (paper simulator, historical re-score, tests) the family gate is a no-op and
+# passes_gate keeps its original type/flow-only behaviour.
+QUOTABLE_POLICY: Quotable | None = None
 
 SESSION_LOG = "data/lp_sessions.csv"
 FILL_LOG = "data/lp_fills.csv"
@@ -52,9 +60,12 @@ MIN_RECENT_TRADES = 15
 
 
 def passes_gate(ticker: str, recent_trades: int) -> bool:
-    """True if `ticker` is eligible to quote: not a toxic type AND showing enough
-    recent flow. `recent_trades` = count of this market's trades in the live
-    trades-feed window (a-priori observable, no look-ahead)."""
+    """True if `ticker` is eligible to quote: its family is quotable under the fail-CLOSED
+    verdict policy (if one is set), it is not a toxic type, AND it shows enough recent flow.
+    `recent_trades` = count of this market's trades in the live trades-feed window (a-priori
+    observable, no look-ahead)."""
+    if QUOTABLE_POLICY is not None and not QUOTABLE_POLICY.allows(ticker):
+        return False  # family not freshly CONFIRMED (and not an explicit --pilot) -> refuse
     if any(t in ticker for t in TOXIC_TYPES):
         return False
     return recent_trades >= MIN_RECENT_TRADES

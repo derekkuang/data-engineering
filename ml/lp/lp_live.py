@@ -52,6 +52,7 @@ import httpx
 from dotenv import load_dotenv
 
 from ingestion.kalshi import INLINE_KEY_ENV_VARS, KalshiClient
+from ml.lp import lp_gate
 from ml.lp.lp_pilot import (
     DAILY_LOSS_LIMIT,
     MAX_MID,
@@ -62,6 +63,7 @@ from ml.lp.lp_pilot import (
     better_market,
     pick_smooth_ticker,
 )
+from ml.lp.quotable import load_quotable
 from ml.lp.ws_book_feed import WsBookFeed
 
 # V2 order endpoints (confirm via --test-order before --live; change here if needed).
@@ -75,6 +77,10 @@ SAFE_TEST_PRICE = 0.02  # a bid here cannot fill on a real market -> validates p
 SKEW_PER_CONTRACT = 0.01
 QUOTE_SIZE = 2  # contracts posted per side per poll (was 1). The scale lever — the cap was
 #                 never binding (held +/-2-3 of 10), so size, not the cap, is what scales us.
+# --pilot mode (deliberately quoting an UNCONFIRMED family to gather its first realized
+# evidence) runs under hard caps: min size + a tight session kill, so a wrong bet is small.
+PILOT_QUOTE_SIZE = 1
+PILOT_LOSS_LIMIT = 5.0  # dollars; session kill when piloting (vs DAILY_LOSS_LIMIT otherwise)
 MARKOUT_HORIZON_S = 30  # seconds; the edge signal = did mid move against us post-fill
 # WS-fills (--ws): our executions arrive on the private `fill` channel (low latency) BUT it
 # carries no seq numbers, so a dropped message is undetectable. REST /portfolio/fills stays the
@@ -123,7 +129,12 @@ FILL_LOG = "data/lp_fills.csv"  # one row per fill with its markout
 #                      fills/min < THIN_FPM_FLOOR AND mark-P&L rate < GOOD_RATE (thin AND not
 #                      paying), after warmup, EVEN WHILE HOLDING (fixes the thin-grind "losing
 #                      battle" but keeps thin-but-paying markets). Still 2x size.
-CONFIG_VERSION = "2026-06-22-thin"
+#   2026-07-25-gated : verdict loop CLOSED, fail-CLOSED — the eligible universe is no longer a
+#                      hardcoded prefix list but the per-family CONFIRMED set from
+#                      quotable_families.json (edge_verdict --emit), enforced in passes_gate;
+#                      --pilot is the audited override for an unconfirmed family (size 1, tight
+#                      kill). Sessions before this ran the OPEN loop — do not blend.
+CONFIG_VERSION = "2026-07-25-gated"
 
 
 def _need_auth(client: KalshiClient) -> None:
@@ -692,6 +703,7 @@ def live(
     ab: bool = False,
     prefixes: tuple[str, ...] | None = None,
     use_ws: bool = False,
+    pilot: bool = False,
 ) -> int:
     """Wall-clock session: quote a market, ROLL to a fresh one when it resolves, and
     (if `switch`) jump to a much more active market mid-session whenever we're flat —
@@ -705,6 +717,7 @@ def live(
     arm because it never binds (inventory sits ~2-3 of 20)."""
     _need_auth(client)
     allow_switch = switch and ticker is None  # pinned market is never switched away from
+    session_kill = PILOT_LOSS_LIMIT if pilot else DAILY_LOSS_LIMIT
     end = time.time() + minutes * 60
     sw = (
         f", switches while flat to {EAGER_FACTOR:g}-{STICKY_FACTOR:g}x-busier markets "
@@ -717,7 +730,8 @@ def live(
         "WS local book + `fill` channel (REST reconcile)" if use_ws else "REST orderbook snapshots"
     )
     print(
-        f"LIVE session: cap +/-{MAX_POSITION}, kill -${DAILY_LOSS_LIMIT:.0f}/mkt + session, "
+        f"{'PILOT ' if pilot else ''}LIVE session: cap +/-{MAX_POSITION}, "
+        f"kill -${session_kill:.0f}/mkt + session, "
         f"{minutes:.0f} min wall-clock — rolls on resolve{sw}. Universe: {universe}. "
         f"Book: {book_src}."
     )
@@ -738,7 +752,7 @@ def live(
                 time.sleep(15)
                 continue
             n_markets += 1
-            size = random.choice([1, 2]) if ab else QUOTE_SIZE
+            size = PILOT_QUOTE_SIZE if pilot else (random.choice([1, 2]) if ab else QUOTE_SIZE)
             # Tag the session by ruleset so analysis can separate runs. '-ws' marks a
             # WS-fed book (so WS-vs-REST capture/markout is comparable, not blended).
             tag = CONFIG_VERSION + ("-ab" if ab else "") + ("-ws" if use_ws else "")
@@ -760,7 +774,7 @@ def live(
             else:
                 retired.add(tk)  # resolved/dud/left markets won't be re-picked this session
             print(f"  [{tk}] ended ({reason}); session P&L so far ${session_pnl:+.2f}")
-            if reason == "kill" or session_pnl <= -DAILY_LOSS_LIMIT:
+            if reason == "kill" or session_pnl <= -session_kill:
                 print("  SESSION KILL — stopping.")
                 break
             if ticker:  # a pinned market can't be rolled
@@ -805,6 +819,24 @@ def main() -> int:
         help="source market data over WebSocket: the per-poll order book AND our fills "
         "(REST-reconciled). Order placement/cancel stay REST (no WS order entry). Single-market.",
     )
+    ap.add_argument(
+        "--quotable",
+        default="quotable_families.json",
+        help="fail-CLOSED verdict file from `edge_verdict --emit`. The bot quotes ONLY the "
+        "families it lists as CONFIRMED; a missing/stale file => idle.",
+    )
+    ap.add_argument(
+        "--pilot",
+        default=None,
+        help="deliberately quote UNCONFIRMED family prefix(es), comma-separated, to gather the "
+        "first realized evidence — hard-capped (size 1, tight kill). e.g. KXLIGAMX",
+    )
+    ap.add_argument(
+        "--max-stale-days",
+        type=int,
+        default=3,
+        help="refuse the whole verdict file if its capture is older than this many days",
+    )
     args = ap.parse_args()
 
     load_dotenv()  # pick up KALSHI_API_BASE/KEY_ID + the inline key from .env
@@ -832,9 +864,30 @@ def main() -> int:
                 print("Refusing --live without --i-understand-live (real money).", file=sys.stderr)
                 return 2
             prefixes = tuple(p.strip() for p in args.prefix.split(",")) if args.prefix else None
+            pilots = tuple(p.strip() for p in args.pilot.split(",")) if args.pilot else ()
+
+            # Load + install the fail-CLOSED family gate (enforced in lp_gate.passes_gate).
+            policy = load_quotable(
+                args.quotable, datetime.now(UTC).date(), args.max_stale_days, pilots
+            )
+            lp_gate.QUOTABLE_POLICY = policy
+            effective = frozenset() if policy.stale else policy.confirmed
+            print(f"Quotable policy: {policy.source}")
+            stale_note = "  (STALE -> refused)" if policy.stale and policy.confirmed else ""
+            print(f"  quotable now: {sorted(effective) or '[] — none'}{stale_note}")
+            if policy.candidates:
+                print(f"  candidates (pilot-only): {sorted(policy.candidates)}")
+            if pilots:
+                print(f"  ⚠ PILOT override active for {list(pilots)} — hard-capped "
+                      f"(size {PILOT_QUOTE_SIZE}, kill ${PILOT_LOSS_LIMIT:.0f}).")
+            if not effective and not pilots:
+                print("  → the bot will IDLE (fail-closed): nothing freshly CONFIRMED and no "
+                      "--pilot. Run `edge_verdict --emit` when capture is sufficient.")
+
             return live(
                 client, args.ticker, args.minutes, args.poll, args.debug,
                 switch=not args.no_switch, ab=args.ab, prefixes=prefixes, use_ws=args.ws,
+                pilot=bool(pilots),
             )
         print("Pick a mode: --auth-check | --test-order | --live --i-understand-live")
         return 1

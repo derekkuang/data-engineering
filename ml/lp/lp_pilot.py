@@ -47,7 +47,12 @@ DAILY_LOSS_LIMIT = 10.0  # dollars; kill switch per-market AND session (was 5; 2
 # WNBA 1H-winners / MLB games marching to a favorite). Capping at 0.92 makes us exit +
 # flatten before the most one-sided last few cents. Lower stays 0.05 (longshots are cheap).
 MIN_MID, MAX_MID = 0.05, 0.92
-BENIGN_PREFIXES = (
+# COARSE pre-filter only — the universe of sports whose books we might quote. This is NOT the
+# authority on WHAT is safe to make: several prefixes here (KXMLB/KXWNBA/KXITF...) were MEASURED
+# toxic. The authoritative, fail-CLOSED gate is the per-family verdict in quotable_families.json,
+# enforced in lp_gate.passes_gate; this list just keeps the trades-feed scan cheap. (Was
+# BENIGN_PREFIXES — renamed 2026-07-25 when the verdict loop was closed, since it is not benign.)
+ELIGIBLE_PREFIXES = (
     "KXMLB",
     "KXNCAA",
     "KXWNBA",
@@ -161,7 +166,7 @@ def pick_smooth_ticker(
 ) -> str | None:
     """Most active benign, NON-jumpy, gate-eligible, MEAN-REVERTING market with a makeable
     2-15c spread. ``exclude`` skips already-used/retired tickers (for rolling). ``prefixes``
-    restricts the eligible ticker prefixes (default BENIGN_PREFIXES); pass e.g. ("KXWC",) to
+    restricts the eligible ticker prefixes (default ELIGIBLE_PREFIXES); pass e.g. ("KXWC",) to
     quote World-Cup-only — the structural finding that soccer's rare-discrete scoring is the
     only consistently benign cell (basketball/baseball continuous scoring -> toxic).
 
@@ -172,7 +177,7 @@ def pick_smooth_ticker(
     None and the caller IDLES rather than bleeding into pick-off books. The 2026-06-18
     overnight lost -$5 doing exactly that (68/84 markets were trending ATP)."""
     skip = exclude or set()
-    pfx = prefixes or BENIGN_PREFIXES
+    pfx = prefixes or ELIGIBLE_PREFIXES
     trades = client.get("/markets/trades", params={"limit": 1000}).get("trades", [])
     counts: Counter[str] = Counter()
     for t in trades:
@@ -207,11 +212,11 @@ def better_market(
     `factor`x more active than `current` (by recent-trade count), else None. Pure activity
     scan — NO orderbook calls — so it's cheap to run inside the quoting loop to chase flow.
     `exclude` skips retired/forbidden tickers (pass `current` too). `prefixes` restricts the
-    eligible prefixes (default BENIGN_PREFIXES; pass ("KXWC",) for World-Cup-only) so the
+    eligible prefixes (default ELIGIBLE_PREFIXES; pass ("KXWC",) for World-Cup-only) so the
     switch stays inside the same universe as selection. Trending winner/moneyline markets are
     skipped so the switch can't yank us INTO the pick-off books selection avoids. Returns None
     if nothing qualifies, so the caller stays put (protects queue)."""
-    pfx = prefixes or BENIGN_PREFIXES
+    pfx = prefixes or ELIGIBLE_PREFIXES
     trades = client.get("/markets/trades", params={"limit": 1000}).get("trades", [])
     counts: Counter[str] = Counter()
     for t in trades:
