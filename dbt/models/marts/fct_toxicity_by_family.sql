@@ -34,7 +34,8 @@ labeled as (
 
         spread_c,
         signed_flow_1m,
-        flow_signed_markout_c
+        flow_signed_markout_c,
+        jump_pickoff_c
     from markout
 
 )
@@ -50,6 +51,12 @@ select
     approx_percentile(
         if(signed_flow_1m != 0, flow_signed_markout_c), 0.5
     )                                                     as med_flow_markout_c,
+    -- flow-INDEPENDENT jump toxicity, over ALL snapshots (jumps happen without net flow): the
+    -- expected per-snapshot pick-off a touch-resting maker faces, and how often it exceeds the
+    -- spread. The known-jumpy controls (ITF/MATCH, *_GAME) must read HIGH here even when their
+    -- flow_markout reads benign (the review's construct-validity fix).
+    avg(jump_pickoff_c)                                   as avg_jump_pickoff_c,
+    avg(if(jump_pickoff_c > 0, 1.0, 0.0))                 as frac_pickoff,
     avg(spread_c)                                         as avg_spread_c
 from labeled
 group by sport, market_type, capture_day

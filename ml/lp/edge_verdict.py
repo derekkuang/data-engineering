@@ -1,25 +1,26 @@
 """THE EDGE VERDICT — is any market family actually makeable? Statistics, not vibes.
 
-Reads the toxicity scoreboard (``fct_toxicity_by_family`` — per family per day, flow-signed
-markout over flow-bearing snapshots) and, where we have traded, the realized capture
-(``fct_lp_market_session``), and prints a per-family verdict:
+Reads the toxicity scoreboard (``fct_toxicity_by_family`` — per family per day) and, where we
+have traded, the realized capture (``fct_lp_market_session``), and judges each family on TWO
+adverse-selection axes:
 
-  * FLOW-TOXIC    — day-block 95% CI of the flow-signed markout sits ABOVE 0: taker flow
-                    predicts price; a resting maker gets picked off. Do not quote.
-  * FLOW-BENIGN   — the CI sits at/below ~0: uninformed flow; the stage-2 candidate set.
-  * INCONCLUSIVE  — CI straddles the line; keep collecting.
-  * INSUFFICIENT  — under the day / flow-observation floors; no verdict yet.
+  * FLOW axis (``markout_c``) — the flow-signed markout: FLOW-TOXIC if its day-block 95% CI sits
+    ABOVE 0 (taker flow predicts price), FLOW-BENIGN if at/below ~0, else INCONCLUSIVE. This axis
+    is BLIND to a jump not preceded by flow (a goal, a tennis point) — the dominant sports pick-off.
+  * JUMP axis (``jump_c``) — the flow-INDEPENDENT goal/point pick-off (max(0,|move|-half-spread)):
+    jump-TOXIC if its CI sits above JUMP_TOXIC_FLOOR, jump-BENIGN if below. This is what catches
+    the books that read flow-benign yet bleed to jumps (MLB-GAME, ITF — the review's blind spot).
 
 Discipline (the project's own standards, applied to making):
   * The resampling unit is the DAY (day-block bootstrap) — thousands of snapshots within one
     game day are one observation of one regime, not thousands.
   * Split-half stability is reported: does the first half of days agree in sign with the second?
-  * The known-toxic controls (ITF, MLB/NBA GAME) are the instrument check: if they don't read
-    toxic once sufficient, DISTRUST every benign verdict (the label is broken, not the market).
+  * The known-toxic controls (ITF/ATP MATCH, MLB/NBA GAME) are the instrument check: each must read
+    toxic on AT LEAST ONE axis; benign on BOTH once sufficient = the label is broken, distrust all.
   * Multiple comparisons: with ~dozens of families, expect false "benign" reads at the margin —
     the PRE-COMMITTED primary hypothesis is soccer TOTAL/SPREAD; everything else is exploratory.
-  * FLOW-BENIGN is necessary, NOT sufficient, for an edge. EDGE = benign flow AND realized
-    capture > 0 on our own fills (stage 2). The realized column shows where that evidence exists.
+  * Benign flow is necessary, NOT sufficient. EDGE = FLOW-BENIGN AND jump-BENIGN AND realized
+    capture > 0 on our own fills (stage 2). ``--emit`` writes that as the fail-closed tier.
 
 Usage:
     uv run python -m ml.lp.edge_verdict                  # verdict over all captured days
@@ -43,14 +44,21 @@ from pyathena import connect
 MIN_DAYS = 5  # fewer days = one regime; no verdict
 MIN_FLOW_OBS = 500  # fewer flow-bearing snapshots = noise
 BENIGN_CI_HI = 0.10  # cents; CI upper bound must sit at/below ~0 to call flow benign
+# The flow-INDEPENDENT jump axis (avg_jump_pickoff_c) reads TOXIC above this floor. Calibrated
+# on the first captures: the known-jumpy controls (ATP/ITF MATCH, *_GAME) sit at 0.4-1.4c while
+# soccer TOTAL sits <0.08c — a ~6x gap, so 0.25c cleanly separates goal/point pick-off from calm.
+JUMP_TOXIC_FLOOR = 0.25
 N_BOOT = 4000
-KNOWN_TOXIC = {("ITF", "MATCH"), ("MLB", "GAME"), ("NBA", "GAME")}  # instrument controls
+# Instrument controls: known-toxic families. On the FLOW axis some read benign (ITF/MLB-GAME flow
+# barely leads price) yet a maker still bleeds to point/score JUMPS — so each control must read
+# toxic on AT LEAST ONE axis; benign on BOTH = the label is broken, not the market benign.
+KNOWN_TOXIC = {("ITF", "MATCH"), ("MLB", "GAME"), ("NBA", "GAME"), ("ATP", "MATCH")}
 
 FloatArr = npt.NDArray[np.float64]
 
 TOX_QUERY = """
 select sport, market_type, capture_day, n_snapshots, n_markets, n_flow_obs,
-       avg_flow_markout_c
+       avg_flow_markout_c, avg_jump_pickoff_c
 from crypto_marts.fct_toxicity_by_family
 where n_flow_obs > 0
 """
@@ -101,17 +109,32 @@ def verdict_for(
     return "INCONCLUSIVE"
 
 
-def tier_for(verdict: str, capture_usd: float | None) -> str | None:
-    """Trading tier from the flow verdict + our OWN realized capture. Only FLOW-BENIGN
-    families are eligible; the realized column decides how far to trust them:
-      * CONFIRMED     — benign flow AND we made positive spread capture making it = quotable.
-      * CANDIDATE     — benign flow, never traded (no fills) = quote ONLY as a --pilot to
-                        gather the first realized evidence, hard-capped.
-      * CONTRADICTION — benign flow but our fills bled (capture <= 0) = do NOT quote; the
-                        flow label and the money disagree (the review's contradiction alarm).
-    Non-benign families return None (absent from the file = never quotable, fail-closed)."""
-    if verdict != "FLOW-BENIGN":
+def jump_state_for(days: int, jlo: float, jhi: float, min_days: int) -> str:
+    """The flow-INDEPENDENT jump verdict from its day-block CI vs JUMP_TOXIC_FLOOR:
+    TOXIC (CI wholly above the floor = goal/point pick-off), BENIGN (CI wholly below), else
+    INCONCLUSIVE. INSUFF under the day floor."""
+    if days < min_days:
+        return "INSUFF"
+    if jlo > JUMP_TOXIC_FLOOR:
+        return "TOXIC"
+    if jhi < JUMP_TOXIC_FLOOR:
+        return "BENIGN"
+    return "INCONCLUSIVE"
+
+
+def tier_for(flow_verdict: str, jump_state: str, capture_usd: float | None) -> str | None:
+    """Trading tier from BOTH toxicity axes + our OWN realized capture. A family must be benign
+    on the flow axis AND not jump-toxic; the realized column then decides how far to trust it:
+      * CONFIRMED     — flow-benign, jump-benign, AND positive realized capture = quotable.
+      * CANDIDATE     — flow-benign + not jump-toxic but not yet CONFIRMED (jump inconclusive OR
+                        never traded) = quote ONLY as a --pilot to gather evidence, hard-capped.
+      * CONTRADICTION — flow-benign + jump-benign but our fills bled (capture <= 0) = do NOT quote.
+    Flow-toxic OR JUMP-TOXIC => None (absent from the file = never quotable). The jump gate is the
+    fix for the review's blind spot: a book can read flow-benign while bleeding to goals/points."""
+    if flow_verdict != "FLOW-BENIGN" or jump_state == "TOXIC":
         return None
+    if jump_state != "BENIGN":
+        return "CANDIDATE"  # jump not confirmed benign -> pilot-only, keep collecting
     if capture_usd is None:
         return "CANDIDATE"
     return "CONFIRMED" if capture_usd > 0 else "CONTRADICTION"
@@ -133,6 +156,7 @@ def emit_quotable(rows: list[dict[str, object]], as_of_day: str, meta: dict[str,
         families[fam] = {
             "tier": tier, "verdict": r["verdict"], "markout_c": r["markout_c"],
             "ci": r["ci_tuple"], "days": r["days"], "flow_obs": r["flow_obs"],
+            "jump_pickoff_c": r["jump_c"], "jump_state": r["jump"],
             "realized_capture_usd": r["capture_usd"], "realized_markout_c": r["realized_markout_c"],
         }
         if tier == "CONFIRMED":
@@ -179,11 +203,18 @@ def main() -> int:
     rows: list[dict[str, object]] = []
     for (sport, mtype), g in tox.groupby(["sport", "market_type"]):
         g = g.sort_values("capture_day")
+        days = len(g)
+        # flow axis (signed by trailing taker flow)
         means = g["avg_flow_markout_c"].to_numpy(dtype=np.float64)
         weights = g["n_flow_obs"].to_numpy(dtype=np.float64)
         point, lo, hi = day_block_ci(means, weights, rng)
-        days, flow_obs = len(g), int(g["n_flow_obs"].sum())
+        flow_obs = int(g["n_flow_obs"].sum())
         v = verdict_for(days, flow_obs, lo, hi, args.min_days, args.min_flow_obs)
+        # jump axis (flow-independent; sees goal/point pick-off the flow axis is blind to)
+        jmeans = g["avg_jump_pickoff_c"].to_numpy(dtype=np.float64)
+        jweights = g["n_snapshots"].to_numpy(dtype=np.float64)
+        jpoint, jlo, jhi = day_block_ci(jmeans, jweights, rng)
+        jstate = jump_state_for(days, jlo, jhi, args.min_days)
         real = realized_by_fam.get((str(sport), str(mtype)))
         capture_usd = float(real["capture_usd"]) if real is not None else None
         realized_mk = (
@@ -197,37 +228,42 @@ def main() -> int:
             "markout_c": round(point, 3),
             "ci": f"[{lo:+.2f},{hi:+.2f}]",
             "ci_tuple": [round(lo, 3), round(hi, 3)],
+            "jump_c": round(jpoint, 3),
+            "jump": jstate,
             "split_half": split_half_sign(means),
             "control": "CONTROL" if (str(sport), str(mtype)) in KNOWN_TOXIC else "",
             "realized_$": f"{capture_usd:+.0f}" if capture_usd is not None else "-",
             "capture_usd": None if capture_usd is None else round(capture_usd, 2),
             "realized_markout_c": realized_mk,
-            "tier": tier_for(v, capture_usd),
+            "tier": tier_for(v, jstate, capture_usd),
             "verdict": v,
         })
 
     out = pd.DataFrame(rows).sort_values(["verdict", "markout_c"])
-    display_cols = ["family", "days", "flow_obs", "markout_c", "ci", "split_half",
+    display_cols = ["family", "days", "flow_obs", "markout_c", "ci", "jump_c", "jump",
                     "control", "realized_$", "tier", "verdict"]
     print("=" * 100)
-    print("EDGE VERDICT — flow-signed markout per family (day-block bootstrap 95% CI, cents)")
-    print("  >0 = taker flow leads price = maker gets picked off. Controls MUST read toxic.")
+    print("EDGE VERDICT — two toxicity axes per family (day-block bootstrap 95% CI, cents)")
+    print("  markout_c: flow-signed (>0 = flow leads price). jump_c: flow-independent goal/point")
+    print(f"  pick-off (TOXIC > {JUMP_TOXIC_FLOOR}c). Controls MUST read toxic on >=1 axis.")
     print("=" * 100)
     print(out[display_cols].fillna("-").to_string(index=False,
                         formatters={"markout_c": lambda x: f"{x:+.2f}"}))
 
     n_eval = int((out["verdict"] != "INSUFFICIENT").sum())
     controls = out[out["control"] == "CONTROL"]
-    bad_controls = controls[controls["verdict"] == "FLOW-BENIGN"]
+    # a control is only "passing" if it reads toxic on SOME axis; benign flow AND non-toxic jump
+    # = the instrument is blind, not the market benign.
+    bad_controls = controls[(controls["verdict"] == "FLOW-BENIGN") & (controls["jump"] != "TOXIC")]
     print(f"\nfamilies evaluated: {n_eval} — expect ~{max(1, n_eval // 20)} false reads at 95%; "
           "the PRE-COMMITTED hypothesis is soccer TOTAL/SPREAD, the rest is exploratory.")
     if not bad_controls.empty:
-        print("⚠ INSTRUMENT FAILURE: known-toxic control(s) read FLOW-BENIGN — "
+        print("⚠ INSTRUMENT FAILURE: known-toxic control(s) read benign on BOTH axes — "
               f"{', '.join(bad_controls['family'])}. Distrust every verdict above; "
               "check the markout horizon / capture density before believing anything.")
-    print("\nFLOW-BENIGN is necessary, NOT sufficient: EDGE = benign flow + realized capture "
-          "> 0 on our own fills (stage 2 = run the bot on benign families; judged in "
-          "fct_lp_daily with the same day-block discipline).")
+    print("\nBenign flow is necessary, NOT sufficient: EDGE = flow-benign AND jump-benign AND "
+          "realized capture > 0 on our own fills. The jump axis is why a book that looks "
+          "flow-benign can still be refused (it bleeds to goals/points).")
 
     if args.emit:
         as_of_day = str(pd.to_datetime(tox["capture_day"]).max().date())

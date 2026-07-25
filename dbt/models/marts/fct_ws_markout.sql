@@ -11,6 +11,16 @@
 -- thing that killed the basketball/baseball books). This is the label to (a) rank markets by
 -- toxicity and (b) train the selection model on the microstructure features.
 --
+-- BUT flow_signed_markout is signed by trailing FLOW — it is BLIND to a jump that isn't preceded
+-- by net taker flow (a GOAL, a tennis point), which is the dominant sports pick-off channel. So we
+-- ALSO carry a flow-INDEPENDENT jump-toxicity metric:
+--   jump_pickoff_c = max(0, |fwd_mid_move_c| - spread_c/2)
+-- A two-sided maker resting at the touch captures the spread when the mid move stays within the
+-- half-spread and is PICKED OFF for the excess when it gaps past it — regardless of flow direction.
+-- Averaged over ALL snapshots (see fct_toxicity_by_family) this is the goal-jump toxicity the
+-- flow-signed label cannot see; the KNOWN-jumpy controls (ITF points, moneyline GAMEs) must read
+-- high on it.
+--
 -- H (label horizon) = 30s to match the maker's MARKOUT_HORIZON_S; tune here. Materialized as a
 -- table — small + fully re-derivable, like the other marts.
 
@@ -72,6 +82,10 @@ select
     fwd_mid,
     fwd_at,
     (fwd_mid - mid) * 100.0 as fwd_mid_move_c,
+    abs((fwd_mid - mid) * 100.0) as abs_fwd_move_c,
+    -- flow-INDEPENDENT jump toxicity: the part of the 30s move that runs PAST the half-spread a
+    -- maker at the touch would capture = what a goal/point jump costs, whether or not flow led it.
+    greatest(0.0, abs((fwd_mid - mid) * 100.0) - spread_c / 2.0) as jump_pickoff_c,
     case
         when signed_flow_1m > 0 then (fwd_mid - mid) * 100.0
         when signed_flow_1m < 0 then -(fwd_mid - mid) * 100.0

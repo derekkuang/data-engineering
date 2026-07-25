@@ -3,12 +3,14 @@ version: 2
 models:
   - name: fct_toxicity_by_family
     description: >
-      The toxicity scoreboard: per (sport, market_type, capture day), the flow-signed markout
-      aggregates from the WS in-play capture — computed over FLOW-BEARING snapshots only
-      (signed_flow_1m != 0), since the label is 0 by construction without flow.
-      avg_flow_markout_c > 0 = taker flow led price = toxic for a resting maker. The day grain
-      feeds ml/lp/edge_verdict.py's day-block bootstrap. ITF / MLB-GAME rows are deliberate
-      known-toxic controls that validate the instrument.
+      The toxicity scoreboard: per (sport, market_type, capture day), two adverse-selection axes
+      from the WS in-play capture. (1) avg_flow_markout_c — the flow-signed markout over
+      FLOW-BEARING snapshots only (signed_flow_1m != 0); >0 = taker flow led price = toxic, but
+      BLIND to flowless jumps. (2) avg_jump_pickoff_c — flow-INDEPENDENT jump toxicity over ALL
+      snapshots (max(0,|fwd move|-half spread)); the goal/point pick-off the flow axis can't see.
+      The day grain feeds ml/lp/edge_verdict.py's day-block bootstrap. ITF / MLB-GAME rows are
+      deliberate known-toxic controls: they must read high on the JUMP axis even if flow reads
+      benign (the instrument check).
     columns:
       - name: sport
         tests:
@@ -20,7 +22,11 @@ models:
         tests:
           - not_null
       - name: n_flow_obs
-        description: "Flow-bearing snapshots — the sample size that matters for the verdict."
+        description: "Flow-bearing snapshots — the sample size for the flow-markout verdict."
+        tests:
+          - not_null
+      - name: avg_jump_pickoff_c
+        description: "Flow-independent jump toxicity (cents) over all snapshots; goal/point pick-off."
         tests:
           - not_null
     tests:

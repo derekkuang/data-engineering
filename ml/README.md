@@ -47,14 +47,15 @@ TOTAL/SPREAD markets.
   soccer (MLS/Brasileirão/Liga MX/Scandinavia)? Screens near-money TOTAL/SPREAD spread + volume
   vs the WC benchmark. First read: club near-money spreads ARE in-band (Liga MX widest ~4c); the
   in-play flow/mean-reversion half still needs a live-game `ws_logger` run to confirm.
-- **`edge_verdict.py`** — THE edge answer, per family: reads `fct_toxicity_by_family` (the
-  captured flow-signed markout) + `fct_lp_market_session` (realized capture) and prints
-  FLOW-TOXIC / FLOW-BENIGN / INCONCLUSIVE / INSUFFICIENT with day-block bootstrap CIs,
-  split-half stability, known-toxic instrument controls (ITF/MLB-GAME must read toxic), and
-  the multiple-comparison caveat. `--emit quotable_families.json` writes the machine-readable,
-  freshness-stamped verdict the bot reads fail-CLOSED: tiers each benign family CONFIRMED
-  (benign + realized capture>0 = quotable), CANDIDATE (benign, untraded = pilot-only), or
-  CONTRADICTION (benign flow but our fills bled = refused). Closes the verdict→bot loop.
+- **`edge_verdict.py`** — THE edge answer, per family: reads `fct_toxicity_by_family` +
+  `fct_lp_market_session` and judges TWO adverse-selection axes with day-block bootstrap CIs —
+  the **flow** axis (`markout_c`, flow-signed) and the **jump** axis (`jump_c`, flow-independent
+  goal/point pick-off). The jump axis is the review's construct-validity fix: it catches books
+  that read flow-benign yet bleed to jumps (ATP/ITF, MLB-GAME) — validated, they read jump-TOXIC
+  while soccer TOTAL reads jump-benign. Controls must read toxic on ≥1 axis. `--emit
+  quotable_families.json` writes the freshness-stamped, fail-CLOSED tier: CONFIRMED (flow-benign
+  AND jump-benign AND realized capture>0 = quotable), CANDIDATE (pilot-only), CONTRADICTION
+  (refused). Closes the verdict→bot loop.
 
 The **DE pipeline** for this bot's data lives outside `ml/`:
 `ingestion/lp_storage.py` → `dbt/models/{staging,marts}/*lp*` → `docs/setup/07-lp-pipeline.md`.

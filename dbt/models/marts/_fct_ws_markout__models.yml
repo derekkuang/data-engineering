@@ -4,9 +4,10 @@ models:
   - name: fct_ws_markout
     description: >
       Toxicity / ML label table: each microstructure snapshot joined forward (H=30s) to a later
-      mid. `flow_signed_markout_c` > 0 means net taker flow predicted the mid move = adverse
-      selection (toxic flow a resting maker gets picked off by). Aggregate per market to rank
-      toxicity; use the microstructure columns as features to train the selection model.
+      mid, on TWO adverse-selection axes. `flow_signed_markout_c` > 0 = net taker flow predicted
+      the move (flow-led pick-off) — but blind to flowless jumps. `jump_pickoff_c` =
+      max(0,|fwd move|-half spread) = the flow-INDEPENDENT goal/point pick-off the flow axis
+      can't see. Aggregate per market to rank toxicity; features train the selection model.
     columns:
       - name: market_ticker
         tests:
@@ -22,6 +23,10 @@ models:
         description: "sign(signed_flow_1m) * forward mid move (cents); >0 = toxic (flow led price)."
         tests:
           - not_null
+      - name: jump_pickoff_c
+        description: >
+          max(0,|fwd move|-half spread) (cents): flow-independent goal/point pick-off. Null for a
+          null-quote (one-sided) snapshot; avg_jump_pickoff_c skips those, so no not_null test.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:

@@ -8,28 +8,38 @@ from datetime import date
 import pytest
 
 from ml.lp import lp_gate
-from ml.lp.edge_verdict import emit_quotable, tier_for
+from ml.lp.edge_verdict import JUMP_TOXIC_FLOOR, emit_quotable, jump_state_for, tier_for
 from ml.lp.quotable import load_quotable
 
 ROWS: list[dict[str, object]] = [
     {"family": "WC/SPREAD", "verdict": "FLOW-BENIGN", "tier": "CONFIRMED", "markout_c": -0.05,
-     "ci_tuple": [-0.10, 0.02], "days": 8, "flow_obs": 1200, "capture_usd": 61.0,
-     "realized_markout_c": -0.13},
+     "ci_tuple": [-0.10, 0.02], "days": 8, "flow_obs": 1200, "jump_c": 0.05, "jump": "BENIGN",
+     "capture_usd": 61.0, "realized_markout_c": -0.13},
     {"family": "MLS/SPREAD", "verdict": "FLOW-BENIGN", "tier": "CANDIDATE", "markout_c": 0.0,
-     "ci_tuple": [-0.10, 0.08], "days": 6, "flow_obs": 800, "capture_usd": None,
-     "realized_markout_c": None},
+     "ci_tuple": [-0.10, 0.08], "days": 6, "flow_obs": 800, "jump_c": 0.06, "jump": "BENIGN",
+     "capture_usd": None, "realized_markout_c": None},
     {"family": "MLB/TOTAL", "verdict": "FLOW-TOXIC", "tier": None, "markout_c": 0.5,
-     "ci_tuple": [0.2, 0.8], "days": 8, "flow_obs": 1000, "capture_usd": -30.0,
-     "realized_markout_c": -0.69},
+     "ci_tuple": [0.2, 0.8], "days": 8, "flow_obs": 1000, "jump_c": 0.19, "jump": "BENIGN",
+     "capture_usd": -30.0, "realized_markout_c": -0.69},
 ]
 
 
+def test_jump_state_for() -> None:
+    hi, lo = JUMP_TOXIC_FLOOR + 0.3, JUMP_TOXIC_FLOOR - 0.2  # clearly above / below the floor
+    assert jump_state_for(4, hi, hi + 0.5, min_days=3) == "TOXIC"      # CI wholly above floor
+    assert jump_state_for(4, 0.01, lo, min_days=3) == "BENIGN"          # CI wholly below floor
+    assert jump_state_for(4, lo, hi, min_days=3) == "INCONCLUSIVE"      # CI straddles the floor
+    assert jump_state_for(2, 0.01, lo, min_days=3) == "INSUFF"          # too few days
+
+
 def test_tier_for() -> None:
-    assert tier_for("FLOW-BENIGN", 61.0) == "CONFIRMED"
-    assert tier_for("FLOW-BENIGN", None) == "CANDIDATE"
-    assert tier_for("FLOW-BENIGN", -5.0) == "CONTRADICTION"  # benign flow but our fills bled
-    assert tier_for("FLOW-TOXIC", 10.0) is None
-    assert tier_for("INCONCLUSIVE", None) is None
+    assert tier_for("FLOW-BENIGN", "BENIGN", 61.0) == "CONFIRMED"
+    assert tier_for("FLOW-BENIGN", "BENIGN", None) == "CANDIDATE"
+    assert tier_for("FLOW-BENIGN", "BENIGN", -5.0) == "CONTRADICTION"  # benign but our fills bled
+    assert tier_for("FLOW-BENIGN", "TOXIC", 61.0) is None  # jump-toxic overrides benign flow
+    assert tier_for("FLOW-BENIGN", "INCONCLUSIVE", 61.0) == "CANDIDATE"  # jump not confirmed benign
+    assert tier_for("FLOW-TOXIC", "BENIGN", 10.0) is None
+    assert tier_for("INCONCLUSIVE", "BENIGN", None) is None
 
 
 def _emit(tmp_path: object) -> str:
