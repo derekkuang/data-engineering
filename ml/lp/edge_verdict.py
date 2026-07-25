@@ -41,7 +41,8 @@ import pandas as pd
 from dotenv import load_dotenv
 from pyathena import connect
 
-MIN_DAYS = 5  # fewer days = one regime; no verdict
+MIN_DAYS = 8  # ET days; a benign call on <8 is too fragile (split-half is a coin flip at 5).
+#               Raised from 5 per the review. Pass --min-days for an early exploratory look.
 MIN_FLOW_OBS = 500  # fewer flow-bearing snapshots = noise
 BENIGN_CI_HI = 0.10  # cents; CI upper bound must sit at/below ~0 to call flow benign
 # The flow-INDEPENDENT jump axis (avg_jump_pickoff_c) reads TOXIC above this floor. Calibrated
@@ -74,16 +75,17 @@ group by sport, market_type
 """
 
 
-def day_block_ci(
-    day_means: FloatArr, day_weights: FloatArr, rng: np.random.Generator
-) -> tuple[float, float, float]:
-    """Weighted mean of per-day means + a 95% CI from resampling DAYS with replacement."""
+def day_block_ci(day_means: FloatArr, rng: np.random.Generator) -> tuple[float, float, float]:
+    """UNWEIGHTED mean of per-day means (each ET day is ONE observation) + a 95% CI from
+    resampling days with replacement. Unweighted is deliberate: weighting by snapshot / flow
+    count re-imports within-day pseudo-replication — one heavy-volume day would dominate the
+    estimate and shrink the CI, when it is really one regime observation. Matches the primary
+    estimator in realized_toxicity.py."""
     n = len(day_means)
-    point = float(np.average(day_means, weights=day_weights))
+    point = float(day_means.mean())
     stats = np.empty(N_BOOT)
     for b in range(N_BOOT):
-        idx = rng.integers(0, n, n)
-        stats[b] = np.average(day_means[idx], weights=day_weights[idx])
+        stats[b] = day_means[rng.integers(0, n, n)].mean()
     lo, hi = np.percentile(stats, [2.5, 97.5])
     return point, float(lo), float(hi)
 
@@ -204,16 +206,14 @@ def main() -> int:
     for (sport, mtype), g in tox.groupby(["sport", "market_type"]):
         g = g.sort_values("capture_day")
         days = len(g)
-        # flow axis (signed by trailing taker flow)
+        # flow axis (signed by trailing taker flow) — unweighted per-day
         means = g["avg_flow_markout_c"].to_numpy(dtype=np.float64)
-        weights = g["n_flow_obs"].to_numpy(dtype=np.float64)
-        point, lo, hi = day_block_ci(means, weights, rng)
+        point, lo, hi = day_block_ci(means, rng)
         flow_obs = int(g["n_flow_obs"].sum())
         v = verdict_for(days, flow_obs, lo, hi, args.min_days, args.min_flow_obs)
         # jump axis (flow-independent; sees goal/point pick-off the flow axis is blind to)
         jmeans = g["avg_jump_pickoff_c"].to_numpy(dtype=np.float64)
-        jweights = g["n_snapshots"].to_numpy(dtype=np.float64)
-        jpoint, jlo, jhi = day_block_ci(jmeans, jweights, rng)
+        jpoint, jlo, jhi = day_block_ci(jmeans, rng)
         jstate = jump_state_for(days, jlo, jhi, args.min_days)
         real = realized_by_fam.get((str(sport), str(mtype)))
         capture_usd = float(real["capture_usd"]) if real is not None else None

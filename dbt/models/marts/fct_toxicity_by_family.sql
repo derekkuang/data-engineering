@@ -24,7 +24,12 @@ with markout as (
 labeled as (
 
     select
-        cast(snapshot_at as date) as capture_day,
+        -- ET calendar day (NOT UTC): a US-evening game slate runs past UTC midnight, so a UTC
+        -- date splits ONE slate into two "days" and narrows the day-block bootstrap CI with
+        -- pseudo-independent halves. ET keeps a slate as one resampling unit. Matches
+        -- fct_lp_market_session.et_day so the two sides' day counts are comparable.
+        cast(with_timezone(snapshot_at, 'UTC') at time zone 'America/New_York' as date)
+            as capture_day,
         market_ticker,
 
         -- Canonical shared classifier (ml/lp/classify.py -> dbt/macros/classify.sql); the
