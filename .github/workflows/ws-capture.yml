@@ -74,11 +74,15 @@ jobs:
       # The capture step outlives the 1-hour OIDC session (90+ min), so the job-start
       # credentials are EXPIRED by the time we upload. Re-exchange the OIDC token for a
       # fresh session right before landing — robust for any --minutes value.
+      # if: always() — if the capture step ERRORS midway (WS drop, Kalshi hiccup), still refresh
+      # creds and land whatever partial CSV was written, rather than losing the window's data.
       - name: Refresh AWS credentials (capture outlives the 1h OIDC session)
+        if: always()
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::546712138633:role/crypto-de-ci
           aws-region: us-east-1
 
       - name: Land features to the S3 raw zone
+        if: always()
         run: uv run python -m ingestion.ws_feature_storage

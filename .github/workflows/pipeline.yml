@@ -77,3 +77,10 @@ jobs:
       - name: dbt build (run + test, incl. PIT correctness test)
         working-directory: dbt
         run: uv run dbt build
+
+      # Dead-man's-switch: a silently-empty in-play capture looks identical to a healthy idle
+      # window, so a broken capture (OIDC/secret/WS-auth) would rot green while the toxicity
+      # marts go stale. This fails the run (red + notification) if no capture landed in 3 days.
+      # Runs LAST so it never blocks the ingest/build above; a single idle day does not alarm.
+      - name: Alarm if the in-play capture has gone stale
+        run: uv run python scripts/healthcheck_ws_capture.py
