@@ -11,7 +11,15 @@
 -- if they don't read toxic here, the instrument is broken, not the market benign.
 --
 -- The day grain exists because days are the honest resampling unit — ml/lp/edge_verdict.py
--- draws day-block bootstrap CIs from this table. Table: small + re-derivable.
+-- draws day-block bootstrap CIs from this table.
+--
+-- Still a full-rebuild TABLE. It aggregates fct_ws_markout per (family, ET day), so it can't use
+-- the append trick fct_ws_markout uses (re-aggregating a day and appending would DUPLICATE that
+-- family-day row); a correct incremental needs merge/insert_overwrite, i.e. an Iceberg or
+-- partitioned table — and converting the existing Hive table to Iceberg requires a DROP+rebuild
+-- (a destructive DDL, deferred to a permissioned run — see docs/setup/09). Not urgent: its scan
+-- is one pass over fct_ws_markout's Parquet (~1.6GB/yr), so the 1GB cap is ~Feb-2027, well after
+-- fct_ws_markout's own self-join breach (~Oct), which IS fixed (incremental) below.
 
 {{ config(materialized='table') }}
 

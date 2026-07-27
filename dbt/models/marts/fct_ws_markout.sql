@@ -21,17 +21,40 @@
 -- flow-signed label cannot see; the KNOWN-jumpy controls (ITF points, moneyline GAMEs) must read
 -- high on it.
 --
--- H (label horizon) = 30s to match the maker's MARKOUT_HORIZON_S; tune here. Materialized as a
--- table — small + fully re-derivable, like the other marts.
+-- H (label horizon) = 30s to match the maker's MARKOUT_HORIZON_S; tune here.
+--
+-- Materialized INCREMENTAL APPEND (was a full-rebuild `table`). This model self-joins
+-- stg_ws_features to itself (each snapshot forward to a later mid), so a full rebuild re-scans
+-- ALL capture history twice every night — which breaches the 1GB Athena workgroup scan cap as
+-- the capture grows (~Oct). Incremental bounds it with TWO conditions on the `f` CTE:
+--   * partition_date >= today-3  -> PRUNES the physical scan to the last few UTC partitions
+--     (dt is the raw partition; snapshot_at is not, so a snapshot_at filter alone would still
+--     scan everything). This is what actually caps the scan.
+--   * snapshot_at > max(this)    -> DEDUP: append only strictly-new snapshots, so re-runs add
+--     nothing (append has no row-merge). The trailing ~150s of a capture have no forward obs yet
+--     (dropped as null); max() = the last STORED snapshot, so the next run naturally resumes just
+--     before them and appends them once their forward mid has landed.
+-- Both conditions apply to BOTH self-join sides (same CTE); g (the forward mid) is always
+-- >= f + 30s and within ~150s, so it lives in the same pruned window. Append (not Iceberg merge)
+-- so the transition needs no DROP of the existing Hive table. --full-refresh rebuilds all (a
+-- deliberate, permissioned op). Caveat: a pipeline gap > the 3-day window would skip the gap's
+-- partitions — the Step-5 dead-man's-switch alarms on a >3-day capture gap, and --full-refresh
+-- recovers. fct_toxicity_by_family stays a full-rebuild table (see its header).
 
-{{ config(materialized='table') }}
+{{ config(materialized='incremental', incremental_strategy='append') }}
 
 {% set horizon_s = 30 %}
 {% set window_s = 120 %}   -- give up if no later obs within this extra window (market went quiet)
+{% set scan_days = 3 %}    -- partition-prune window; wider than the daily gap, < a real outage
 
 with f as (
 
     select * from {{ ref('stg_ws_features') }}
+
+    {% if is_incremental() %}
+    where partition_date >= date_format(current_date - interval '{{ scan_days }}' day, '%Y-%m-%d')
+      and snapshot_at > (select max(snapshot_at) from {{ this }})
+    {% endif %}
 
 ),
 
