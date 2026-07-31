@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import math
 import os
 import time
 from dataclasses import dataclass
@@ -40,6 +41,14 @@ REQUEST_TIMEOUT_SECONDS = 30.0
 RATE_LIMIT_SLEEP_SECONDS = 0.5  # the public API rate-limits; pace every request
 MAX_RETRIES = 6
 SERIES_BTC_15M = "KXBTC15M"
+
+
+def kalshi_taker_fee(price: float, rate: float = 0.07) -> float:
+    """Kalshi taker fee, dollars per contract: ``ceil(rate * p*(1-p) * 100) / 100`` — the
+    quadratic schedule rounded UP to the cent. ``rate`` is 0.07 for most sports/event series,
+    ~0.0875 for crypto. The canonical home for the fee formula: callers should import this
+    rather than re-deriving the coefficient + cent-rounding (it previously lived in four places)."""
+    return math.ceil(rate * price * (1.0 - price) * 100.0) / 100.0
 
 
 # Env vars that may hold the private key PEM INLINE (pasted into .env), checked in

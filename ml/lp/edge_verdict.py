@@ -10,6 +10,13 @@ adverse-selection axes:
   * JUMP axis (``jump_c``) — the flow-INDEPENDENT goal/point pick-off (max(0,|move|-half-spread)):
     jump-TOXIC if its CI sits above JUMP_TOXIC_FLOOR, jump-BENIGN if below. This is what catches
     the books that read flow-benign yet bleed to jumps (MLB-GAME, ITF — the review's blind spot).
+  * BREADTH (``breadth``) — a market ATTRIBUTE, not an axis: SINGLE_NAME (a named team/player's
+    outcome) vs BROAD (aggregate over/under). Per Bartlett & O'Hara (2026, 41.6M Kalshi trades)
+    one-sided-flow toxicity predicts maker losses in SINGLE_NAME markets but NOT BROAD — i.e. the
+    FLOW axis only has power for SINGLE_NAME. Reported + diagnosed here (does the localization
+    replicate on our data?); the gate stays flow+jump for now, and breadth-aware gating (relax the
+    flow requirement for BROAD families, where a one-sided flow reading isn't toxicity) is the
+    MEASURED next step, not assumed.
 
 Discipline (the project's own standards, applied to making):
   * The resampling unit is the DAY (day-block bootstrap) — thousands of snapshots within one
@@ -58,7 +65,7 @@ KNOWN_TOXIC = {("ITF", "MATCH"), ("MLB", "GAME"), ("NBA", "GAME"), ("ATP", "MATC
 FloatArr = npt.NDArray[np.float64]
 
 TOX_QUERY = """
-select sport, market_type, capture_day, n_snapshots, n_markets, n_flow_obs,
+select sport, market_type, breadth, capture_day, n_snapshots, n_markets, n_flow_obs,
        avg_flow_markout_c, avg_jump_pickoff_c
 from crypto_marts.fct_toxicity_by_family
 where n_flow_obs > 0
@@ -156,7 +163,8 @@ def emit_quotable(rows: list[dict[str, object]], as_of_day: str, meta: dict[str,
             continue  # not benign -> omit entirely (absence = not quotable)
         fam = str(r["family"])
         families[fam] = {
-            "tier": tier, "verdict": r["verdict"], "markout_c": r["markout_c"],
+            "tier": tier, "verdict": r["verdict"], "breadth": r["breadth"],
+            "markout_c": r["markout_c"],
             "ci": r["ci_tuple"], "days": r["days"], "flow_obs": r["flow_obs"],
             "jump_pickoff_c": r["jump_c"], "jump_state": r["jump"],
             "realized_capture_usd": r["capture_usd"], "realized_markout_c": r["realized_markout_c"],
@@ -206,6 +214,7 @@ def main() -> int:
     for (sport, mtype), g in tox.groupby(["sport", "market_type"]):
         g = g.sort_values("capture_day")
         days = len(g)
+        breadth = str(g["breadth"].iloc[0])  # constant within a (sport, market_type) group
         # flow axis (signed by trailing taker flow) — unweighted per-day
         means = g["avg_flow_markout_c"].to_numpy(dtype=np.float64)
         point, lo, hi = day_block_ci(means, rng)
@@ -223,6 +232,7 @@ def main() -> int:
         )
         rows.append({
             "family": f"{sport}/{mtype}",
+            "breadth": breadth,
             "days": days,
             "flow_obs": flow_obs,
             "markout_c": round(point, 3),
@@ -240,7 +250,7 @@ def main() -> int:
         })
 
     out = pd.DataFrame(rows).sort_values(["verdict", "markout_c"])
-    display_cols = ["family", "days", "flow_obs", "markout_c", "ci", "jump_c", "jump",
+    display_cols = ["family", "breadth", "days", "flow_obs", "markout_c", "ci", "jump_c", "jump",
                     "control", "realized_$", "tier", "verdict"]
     print("=" * 100)
     print("EDGE VERDICT — two toxicity axes per family (day-block bootstrap 95% CI, cents)")
@@ -261,6 +271,26 @@ def main() -> int:
         print("⚠ INSTRUMENT FAILURE: known-toxic control(s) read benign on BOTH axes — "
               f"{', '.join(bad_controls['family'])}. Distrust every verdict above; "
               "check the markout horizon / capture density before believing anything.")
+
+    # --- BREADTH diagnostic (Bartlett & O'Hara 2026): does flow-toxicity localize to SINGLE_NAME? -
+    # If SINGLE_NAME reads materially more flow-toxic than BROAD, the flow gate should apply to
+    # SINGLE_NAME only — a BROAD family failing on the flow axis ALONE may be a false refusal. This
+    # is the measured evidence for (or against) the breadth-aware gate; the gate is unchanged today.
+    evaluated = out[out["verdict"] != "INSUFFICIENT"]
+    print("\nBREADTH — is the FLOW axis's power concentrated in SINGLE_NAME markets? (lit: yes)")
+    for b in ("SINGLE_NAME", "BROAD"):
+        sub = evaluated[evaluated["breadth"] == b]
+        if sub.empty:
+            print(f"  {b:11} — no families evaluated yet")
+            continue
+        mean_flow = float(sub["markout_c"].mean())
+        frac_toxic = float((sub["verdict"] == "FLOW-TOXIC").mean())
+        mean_jump = float(sub["jump_c"].mean())
+        print(f"  {b:11} n={len(sub):>2}  mean flow-markout {mean_flow:+.3f}c  "
+              f"flow-TOXIC {frac_toxic:.0%}  mean jump {mean_jump:.3f}c")
+    print("  (A BROAD family failing on flow ALONE may be a false refusal — the measured basis "
+          "for breadth-aware gating, still a proposal, not yet wired into the tier.)")
+
     print("\nBenign flow is necessary, NOT sufficient: EDGE = flow-benign AND jump-benign AND "
           "realized capture > 0 on our own fills. The jump axis is why a book that looks "
           "flow-benign can still be refused (it bleeds to goals/points).")

@@ -4,6 +4,87 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-07-31 — code review of the edge-scan work: 15 findings fixed; corrected re-runs confirm both nulls (and the MVE magnitude was overstated)
+
+Ran an xhigh multi-agent code review (correctness + cleanup + fresh-eyes sweep) over the working-tree diff (breadth axis + the two new research scripts). The **breadth-axis production change was triple-confirmed CLEAN** (SQL↔Python parity, dbt grain/uniqueness, tests all hold) — every one of the 15 findings was in the two *standalone research scripts*, and all are fixed.
+
+**Correctness (`ml/research/sportsbook_divergence.py` unless noted):**
+- **CRITICAL — `kalshi_settled_games` collapsed its key to the team-set only** (`{k[1]: v}`), silently dropping every repeat matchup (MLB series = 3-4 games on consecutive dates) → the first backtest ran on ~1/3 of games (that's why it found 102 Kalshi games / 98 matched). Fixed: key by `(date, teams)`, look up by `(date, key)`.
+- **HIGH — doubleheaders** (same teams, same day) collided on both the ESPN and Kalshi sides → now dropped on both sides and counted.
+- **MEDIUM — `mve_parlay_scan` truncated candidates to a pagination-ordered PREFIX** (`cand[:sample]`, count printed *after* the slice) → the "2.07×" was measured on a biased head slice. Fixed: seeded random sample + report the pre-truncation count.
+- Hardcoded UTC-4 offset for "today ET" (wrong in EST) → `ZoneInfo("America/New_York")`; `moneyLine==0` passed the None-guard and fabricated a 1.0 prob → reject `|ml|<100`; the pre-game candle window admitted 60s of in-game book (off-by-one) → strict `> start_ts` cut, order-robust; silent fallback to a non-DraftKings book → DK-only; `TEAM_ALIAS "LA"→"LAD"` (Angels/Dodgers merge) removed; `test_breadth` was tautological → pinned MATCH/WINNER/GAME/OTHER to literals; MVE leg-side unguarded → skip unknown-side legs (no silent complement).
+
+**Cleanup:** folded three duplicated helpers into shared imports — `day_block_ci` (from `edge_verdict`), `log_loss` (sklearn), and a new canonical `kalshi_taker_fee` in `ingestion/kalshi.py` (was a 4th copy) — batched the per-side candlestick calls (2→1 per game), deleted dead code. 73 pytest pass, ruff+mypy clean.
+
+**Corrected re-runs — both nulls hold; one magnitude was overstated:**
+- **MLB sportsbook divergence: NULL confirmed on 204 games** (up from a biased 98). DK devig log loss **0.6856 vs Kalshi 0.6858** (still statistically identical), median divergence **0.41c** ≪ 2c fee, ~zero qualifying bets. The dedup fix doubled the sample and the conclusion is unchanged — Kalshi sports moneylines are as sharp as the DraftKings closing line.
+- **MVE overround corrected from ~2.07× to ~1.38×** (cross-game, n=85, clean/untruncated). The 2.07× was measured on a biased pagination prefix; the honest number is retail paying ~**38%** above leg-implied fair, not ~2×. Still a real positive bias — and the **VERDICT is unchanged and is the actual finding: structurally UNCAPTURABLE** (Part A this run: **0 of 5,044** traded combos have a resting bid — a one-sided, buy-only book). The MVE universe also shifts day to day (145 candidates today vs ≥500 two days ago), so the magnitude carries real variance; the uncapturability does not.
+
+**Lesson logged:** a silent key-collapse or an unlogged truncation biases a result without ever failing — the "no silent caps, log what's dropped" and "resample by the honest unit" disciplines the production marts follow apply to throwaway-looking research scripts too. Two reported numbers (98→204 games, 2.07×→1.38×) moved because of it.
+
+---
+
+## 2026-07-29 (cont.) — candidate #3 BACKTESTED: Kalshi sports moneylines are as sharp as the DraftKings line → NULL (trapped in the fee)
+
+Backtested the one non-market-making candidate from the morning's edge scan: does the thin prediction market (Kalshi) diverge PROFITABLY from the sharp book (DraftKings)? Unlike the dead cross-venue crypto arb (killed by settlement-index basis — BRTI TWAP vs Chainlink), a game moneyline settles on the UNAMBIGUOUS result, so there's no basis risk; you're borrowing DraftKings' model, not racing a second index. Built a REAL historical backtest on 100%-free data.
+
+`ml/research/sportsbook_divergence.py` (public data, one script, ruff+mypy clean):
+- **ESPN's keyless endpoints retain, per past date, each completed game's CLOSING DraftKings moneyline + total AND the winner** (`site.api.espn.com/.../scoreboard?dates=` + `/summary` pickcenter) — verified they persist for finished games, which is what makes a historical (not just forward-logged) backtest possible with no paid odds feed.
+- Kalshi settled `KXMLBGAME` markets → the pre-game book (mid + ask) at ESPN's authoritative game-start ts via candlesticks, + the result. Matched ESPN↔Kalshi by (ET date, team set); the Kalshi ticker encodes both team codes.
+- Devig DK's two-way moneyline → fair prob; EV of buying a side on Kalshi = `dk_fair − ask − taker_fee`; bet the best-EV side per game when EV clears a threshold; day-block bootstrap CI (resample by DAY, the project's honest unit).
+
+**RESULT — MLB, 98 matched games (~2 weeks; Kalshi's settled-listing horizon caps the depth, not the code): NULL, the same death pattern.**
+- **DraftKings devig log loss 0.6870 vs Kalshi pre-game mid 0.6877 — statistically identical.** Kalshi's pre-game price is *as sharp as* DK's closing line → there is nothing to borrow.
+- **Median |divergence| 0.38c** (p90 1.09c) — the two venues agree to SUB-CENT, an order of magnitude below the ~2c Kalshi taker fee (and the ~1c half-spread). 
+- **Bets: at threshold 0.00 exactly 1 of 98 games cleared (barely — edge 0.45c — and it lost); at any real threshold, ZERO.** The divergence never exceeds spread + fee, so there is structurally no positive-EV taker bet.
+- **WNBA confirms it on a second sport (35 games):** DK devig log loss 0.5267 vs Kalshi 0.5243 — Kalshi is, if anything, *sharper* than the DraftKings line; median divergence 0.42c; ZERO bets at every threshold. Not an MLB artifact.
+
+**Mechanism:** the mispricing is real but tiny and **trapped inside the fee** — the identical wall (efficient-price / trapped-inside-spread) that killed favorite-longshot, cross-venue arb, and threshold-arb. Kalshi sports moneylines are efficiently priced vs the sharp book.
+
+**Honest caveats:** single-book (DraftKings) not a multi-book sharp consensus; a closing-line comparison (divergence could be larger hours pre-game when Kalshi is thinner — untested, no free historical DK line path — but the closing-fade moment is game-start anyway); MLB + WNBA so far (the module is parametrized `--series`/`--sport-path` to extend). A genuinely thin niche league where Kalshi is less efficient than DK *could* differ, but the efficiency↔friction pattern predicts that gap is trapped inside a wide spread too. Bonus: the ESPN-closing-line + Kalshi-candlestick rig is a reusable free sports odds/outcome feed, and the script doubles as a forward logger if ever wanted.
+
+**Verdict: #3 CLOSED (null).** All three edge-scan candidates are now resolved: #1 breadth axis built + measured (localization didn't replicate on thin data, gate unchanged), #2 esports downgraded by a structure probe (volume is in fast-scoring winner books, tight-where-liquid / wide-only-where-thin), #3 backtested null. The edge frontier is genuinely exhausted; durable value remains the platform + the honest arc, and the disciplined trading path is still the live club-soccer pilot. *(Done autonomously while Derek was away; nothing committed or pushed — staged for review.)*
+
+---
+
+## 2026-07-29 — extensive edge scan (no new alpha; 2 papers CONFIRM the thesis) + breadth axis BUILT, measured, gate unchanged
+
+Ran an extensive "any other possible edge?" search (3 parallel research agents: a full inventory of the ~32 tried axes, a data/infra feasibility map, and a web scan of the 2026 Kalshi/prediction-market landscape). **Headline: there is no undiscovered alpha — and the search STRENGTHENS the arc.** Two peer-reviewed 2026 papers independently confirm the exact thesis this project's toxicity machinery was built around:
+- **Bartlett & O'Hara, "Adverse Selection in Prediction Markets: Evidence from Kalshi" (SSRN, 41.6M trades):** retail overbets YES in NO-settling markets (bought YES 60.9% but settled 32.5% single-name); that behavioral surplus PAYS the maker (1.91¢/contract single-name vs 0.82¢ broad-based); and VPIN one-sided-flow toxicity predicts maker losses **in single-name markets but NOT broad-based**.
+- **Bürgi, Deng & Whelan, "Makers and Takers" (2026, 300k+ contracts):** takers lose ~32%, makers ~10% — makers far better but both lose holding naked to settlement. Discipline: be the maker, capture spread+reward, net inventory before settlement.
+
+The death-pattern map is unchanged: everything requiring a RACE, a better FORECAST, CROSS-VENUE arb, or fast-scoring MM is dead; behavioral biases are real but trapped inside the spread. The lone survivor (soccer TOTAL/SPREAD MM) evades all of them via rare-discrete scoring + wide-spread + uninformed + thin-competition. Three candidates survive scrutiny: **(1) single-name-vs-broad-based toxicity axis** (literature-backed, cheap — chosen), (2) esports (tier-2 CS2/LoL) as the next MM family, (3) PM-vs-sharp-sportsbook divergence (the one fresh non-MM angle, evades cross-venue basis-risk because game moneylines settle unambiguously). Full record in memory `project-edge-scan-2026-07`.
+
+**Built #1 — the breadth axis — measurement-FIRST (like the jump axis), gate UNCHANGED.**
+- `ml/lp/classify.py`: new `breadth()` (SINGLE_NAME vs BROAD, coarsened from market_type: TOTAL=BROAD, SPREAD/MATCH/WINNER/GAME=SINGLE_NAME) + a generated `classify_breadth` macro. Parity-tested (Python == macro), and breadth can never disagree with the type it's derived from.
+- `fct_toxicity_by_family`: carries `breadth` (rebuilt vs Athena, PASS=8). Grain is unchanged — breadth is functionally determined by market_type, so the (sport, market_type, capture_day) uniqueness test still holds.
+- `edge_verdict.py`: reports breadth per family + a **localization diagnostic** — does flow-toxicity concentrate in SINGLE_NAME as the paper predicts?
+- **RESULT — it does NOT replicate on our thin data** (--min-days 3): SINGLE_NAME mean flow-markout +0.033c (14% flow-toxic) vs BROAD +0.302c (0% toxic) — BROAD *higher*, opposite of the literature, but only n=2 BROAD families cleared the floor (BRASILEIRO/TOTAL +0.54c on a wide CI dominates) → underpowered, not contradicted. The JUMP axis *did* show the expected single-name≫broad gap (0.542 vs 0.113c) — but that's the goal/point channel, not the flow channel the paper is about.
+- **So the Phase-2 gate change (relax the flow-benign requirement for BROAD families) is correctly NOT made** — the data doesn't support it yet, and on this sample it points the other way. The diagnostic auto-re-checks as BROAD capture accrues. This is the PROVEN-vs-ASSUMED discipline working: the paper was tested, not wired into a fail-closed gate on faith. Durable value regardless: the literature-standard breadth vocabulary is now a first-class dimension in the scoreboard + verdict, plus an auto-monitoring hypothesis test. 73 pytest pass, ruff+mypy clean.
+
+---
+
+## 2026-07-28 — MVE parlay route MEASURED: the bias is real and huge (~2× overround), but structurally UNCAPTURABLE
+
+The last open non-latency edge frontier. MVE (Multivariate Event) contracts are Kalshi's parlay product — one binary that pays YES iff every selected leg settles to its chosen side, live since Dec-2025, with a machine-readable `mve_selected_legs` list. The hypothesis was the one documented behavioral inefficiency the alpha hunt never covered: retail systematically OVERPAYS for parlays (lottery-payout appeal + correlation neglect), so the combo should price above its leg-implied joint — an overpricing you could **fade**. Prior was ~30%. Built a desk scan (`ml/research/mve_parlay_scan.py`, public data, one script, ruff+mypy clean) that answers two questions in order: (A) is there a fadeable surface? (B) how big is the bias?
+
+**Part A — the tradeability GATE says NO fade surface exists.** Scanned the open MVE universe off the raw `/markets` feed (MVE combos are *excluded* from the `/events` path the rest of the pipeline uses — they flood everything, ~89k open combos, 99% of the raw feed):
+- **89.9% are provisional auto-generated shells** (Kalshi combinatorially generates every leg permutation; legs 2→59, median 7).
+- **MVE is a real retail product**: 10.1% have traded (lifetime vol or OI); ~10M contracts of lifetime volume across the two collections (`KXMVESPORTSMULTIGAMEEXTENDED-R`, `KXMVECROSSCATEGORY-R`).
+- **But the book is one-sided exactly where the money is.** Of 4,535 traded combos, **1 has a resting YES bid** (0.02%). Of ~45k combos, only 11 (0.02%) have a two-sided quote — and those have **zero volume/OI**. The intersection (traded AND two-sided) = **1 in 44,924**. Retail buys parlays and HOLDS to expiry (volume ≈ open interest), so the participated combos are buy-only (no bid to sell into) while the two-sided combos are the ones nobody trades.
+
+**Part B — the BIAS is real and large.** On combos I can price (all legs still active with a two-sided quote), P(leg hits side) = leg yes-mid (or 1−mid for a NO leg), independent joint = product, overround = combo_ask − joint:
+- **100% of combos** (n=500) price ABOVE the independent joint. Unanimous, and stable across sample sizes (n=60 and n=500 both land at 2.07×).
+- **Cross-game combos** (legs from distinct games ≈ independent — the cleanest cohort): median overround **+6.8c**, combo ask ≈ **2.07× the fair joint**. Retail pays roughly **double** fair value.
+- Hand-verified on concrete combos: three independent 3-leg MLB parlays all priced at ~2.04× (e.g. legs 0.47·0.445·0.525 = 0.110 → combo ask 0.224). The eerie consistency = Kalshi's **algorithmic parlay margin**, not noise.
+- Honest caveats: overround is measured leg-mid vs combo-ask, so a sliver is leg bid-ask — but legs are ~1–3c wide (half-spread ≪ the 7c/100% gap), so the bias dominates. Same-game legs are positively correlated (raises the true joint), which is why cross-game is the trustworthy read; the same-game cohort still shows +3.1c / 1.32× even after that haircut.
+
+**Verdict — the cleanest kind of null: a mechanism, not a shrug.** The retail longshot-parlay bias isn't just real, it's enormous (~2× overround = the documented behavioral inefficiency compounded with Kalshi's parlay vig). But it is **structurally uncapturable**: the fadeable set is 1 in 45,000. You can only BUY the overpriced parlay (be the retail sucker), never short it — there is no bid, and buying combo-NO costs ~100c (no NO liquidity either). This is the "favorite-longshot bias is real but trapped inside the spread" death (README) in its most extreme form: not trapped in the spread, but with **no fade side at all**. To take it you'd have to POST a bid and wait for retail to SELL you their lottery tickets — and retail never sells parlays (vol ≈ OI = bought and held).
+
+**Where this leaves the map.** MVE was the last open edge frontier that wasn't a pure latency race. It's now measured and closed. The alpha map is complete: every axis is null or uncapturable (BTC direction, favorite-longshot on singles, settlement-lag, cross-venue, weather, tennis, perps, goal-taking/latency, and now MVE parlays). This doesn't change the plan — the durable deliverable was always the platform + the honest arc, and the disciplined trading path remains the live club-soccer (Liga MX) SPREAD pilot. MVE just adds one more rigorously-closed door, and a good one: a documented bias, quantified at 2×, shown uncapturable by microstructure.
+
+---
+
 ## 2026-07-25 → 27 — Step 5 (ops: capture dead-man's-switch) + Step 6 (cost: markout incremental) — autonomous backlog run
 
 Cleared the last two review-flagged hygiene items while the pilot waits on a live game. Both pushed to `origin/main`.

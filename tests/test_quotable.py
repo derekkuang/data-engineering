@@ -12,13 +12,16 @@ from ml.lp.edge_verdict import JUMP_TOXIC_FLOOR, emit_quotable, jump_state_for, 
 from ml.lp.quotable import load_quotable
 
 ROWS: list[dict[str, object]] = [
-    {"family": "WC/SPREAD", "verdict": "FLOW-BENIGN", "tier": "CONFIRMED", "markout_c": -0.05,
+    {"family": "WC/SPREAD", "breadth": "SINGLE_NAME", "verdict": "FLOW-BENIGN", "tier": "CONFIRMED",
+     "markout_c": -0.05,
      "ci_tuple": [-0.10, 0.02], "days": 8, "flow_obs": 1200, "jump_c": 0.05, "jump": "BENIGN",
      "capture_usd": 61.0, "realized_markout_c": -0.13},
-    {"family": "MLS/SPREAD", "verdict": "FLOW-BENIGN", "tier": "CANDIDATE", "markout_c": 0.0,
+    {"family": "MLS/SPREAD", "breadth": "SINGLE_NAME", "verdict": "FLOW-BENIGN",
+     "tier": "CANDIDATE", "markout_c": 0.0,
      "ci_tuple": [-0.10, 0.08], "days": 6, "flow_obs": 800, "jump_c": 0.06, "jump": "BENIGN",
      "capture_usd": None, "realized_markout_c": None},
-    {"family": "MLB/TOTAL", "verdict": "FLOW-TOXIC", "tier": None, "markout_c": 0.5,
+    {"family": "MLB/TOTAL", "breadth": "BROAD", "verdict": "FLOW-TOXIC", "tier": None,
+     "markout_c": 0.5,
      "ci_tuple": [0.2, 0.8], "days": 8, "flow_obs": 1000, "jump_c": 0.19, "jump": "BENIGN",
      "capture_usd": -30.0, "realized_markout_c": -0.69},
 ]

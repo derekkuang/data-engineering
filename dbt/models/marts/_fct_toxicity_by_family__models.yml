@@ -18,6 +18,13 @@ models:
       - name: market_type
         tests:
           - not_null
+      - name: breadth
+        description: >
+          SINGLE_NAME (a named team/player's outcome) vs BROAD (aggregate over/under), coarsened
+          from market_type. Per Bartlett & O'Hara (2026), flow-signed-markout toxicity has power
+          only for SINGLE_NAME; a one-sided flow reading on a BROAD family is not toxicity evidence.
+        tests:
+          - not_null
       - name: capture_day
         tests:
           - not_null

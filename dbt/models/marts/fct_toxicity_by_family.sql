@@ -44,6 +44,11 @@ labeled as (
         -- LP-fills mart uses the SAME macro, so the two sides' families join by construction.
         {{ classify_sport('market_ticker') }} as sport,
         {{ classify_market_type('market_ticker') }} as market_type,
+        -- Breadth (Bartlett & O'Hara 2026): SINGLE_NAME vs BROAD. Coarsened from market_type, so
+        -- it never disagrees; carried here so edge_verdict knows WHERE the flow axis has power
+        -- (flow-toxicity localizes to SINGLE_NAME; a one-sided flow reading on a BROAD family is
+        -- not evidence of toxicity).
+        {{ classify_breadth('market_ticker') }} as breadth,
 
         spread_c,
         signed_flow_1m,
@@ -56,6 +61,7 @@ labeled as (
 select
     sport,
     market_type,
+    breadth,
     capture_day,
     count(*)                                              as n_snapshots,
     count(distinct market_ticker)                         as n_markets,
@@ -72,5 +78,5 @@ select
     avg(if(jump_pickoff_c > 0, 1.0, 0.0))                 as frac_pickoff,
     avg(spread_c)                                         as avg_spread_c
 from labeled
-group by sport, market_type, capture_day
+group by sport, market_type, breadth, capture_day
 order by capture_day, sport, market_type

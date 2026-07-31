@@ -11,7 +11,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ml.lp.classify import SOCCER_SPORTS, emit_sql, family, market_type, sport
+from ml.lp.classify import (
+    BROAD_TYPES,
+    SINGLE_NAME_TYPES,
+    SOCCER_SPORTS,
+    breadth,
+    emit_sql,
+    family,
+    market_type,
+    sport,
+)
 
 MACRO_FILE = Path(__file__).resolve().parents[1] / "dbt" / "macros" / "classify.sql"
 
@@ -53,6 +62,27 @@ def test_python_classifier_matches_fixture() -> None:
         assert sport(ticker) == exp_sport, ticker
         assert market_type(ticker) == exp_type, ticker
         assert family(ticker) == f"{exp_sport}/{exp_type}"
+
+
+def test_breadth_coarsens_market_type() -> None:
+    # breadth is derived from market_type: TOTAL -> BROAD, {SPREAD,MATCH,WINNER,GAME} ->
+    # SINGLE_NAME, unclassified -> OTHER. It must never disagree with the type it's coarsened from.
+    assert BROAD_TYPES.isdisjoint(SINGLE_NAME_TYPES)
+    for ticker, _exp_sport, exp_type in FIXTURE:
+        expected = (
+            "BROAD" if exp_type in BROAD_TYPES
+            else "SINGLE_NAME" if exp_type in SINGLE_NAME_TYPES
+            else "OTHER"
+        )
+        assert breadth(ticker) == expected, ticker
+    # Independent semantic pins to LITERALS (NOT derived from the sets under test), so moving a
+    # token between BROAD_TYPES/SINGLE_NAME_TYPES fails here instead of shipping green.
+    assert breadth("KXWCTOTAL-26JUL19ARGFRA") == "BROAD"
+    assert breadth("KXWCSPREAD-26JUL19ARGFRA") == "SINGLE_NAME"
+    assert breadth("KXATPMATCH-26JUL24") == "SINGLE_NAME"
+    assert breadth("KXWTAWINNER-26JUL24") == "SINGLE_NAME"
+    assert breadth("KXNHLGAME-26OCT01") == "SINGLE_NAME"
+    assert breadth("KXMLBRFI-26JUN161915SFATL") == "OTHER"  # no known type token
 
 
 def test_all_club_soccer_is_soccer() -> None:
