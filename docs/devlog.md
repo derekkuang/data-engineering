@@ -4,6 +4,24 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-08-04 — pick-off dynamics: the jump has a strong microstructure WARNING, but it's a PULL signal (no direction) with short lead time
+
+Built `ml/research/pickoff_dynamics.py` to answer the question the soccer pilot's risk management hinges on, using the abundant *toxic* non-soccer capture as the training ground: MLB at-bats and tennis points are FREQUENT, so they're the best data to characterize the pick-off (soccer goals are too rare to study directly), and the rule transfers. For each frequent-scoring sport over ~12 capture days from `fct_ws_markout`: is the next-30s pick-off jump front-run by observable microstructure, or is it a news surprise?
+
+Method: a snapshot's TRAILING 60s features (all observable at decision time t) vs its FORWARD 30s `jump_pickoff`. Three reads — (1) univariate AUC of each leading feature predicting a jump (≥2c past the half-spread); (2) is `flow_signed_markout` on jumps CI-positive (flow-led) or ~0 (news), day-block bootstrapped by (sport, ET day); (3) the |jump| magnitude → the spread cushion needed.
+
+**Findings — consistent across ATP, ITF, MLB, WNBA (4 independent sports):**
+- **A strong WARNING exists.** A surge in trade-rate, flow magnitude, and recent mid-volatility precedes the jump with **AUC ~0.78–0.83**, and the pre-jump values run **7–22× the calm baseline**. The activity spike is unmistakable.
+- **But it's a PULL signal, not a LEAN signal.** The flow DIRECTION doesn't tell you which way: `sign(flow)==sign(jump)` hit rate is **51–52%** (a coin flip) in every sport. A maker can detect "a jump is imminent" and pull/widen, but cannot profitably pick a side. The "flow-led" tag on MLB/WNBA (mean flow-signed markout CI>0: +0.48c / +1.12c) is magnitude, not a clean directional edge.
+- **Book IMBALANCE is NOT the warning** (AUC **0.38–0.47**, below chance) — counterintuitive but sensible: informed takers HIT the book as news breaks, spiking trades/flow/vol, while resting-book imbalance stays noisy. The signal is in the TAPE, not the book.
+- **Spread cushion alone is hopeless.** Pick-off |move| p90 is **12–20c**; you'd need a ~12–20c half-spread to dodge 90% of jumps — nobody quotes that wide. The pull rule is essential, not optional.
+
+**The binding caveat:** the trailing window that carries the warning partly captures the START of the same move (a score at t−10s spikes trailing flow AND drives the forward jump), so the actionable LEAD time is short — consistent with the earlier "reprice completes ≤5s" finding. The signal is real; whether a *retail* maker's poll/cancel latency can pull in time is the open question, and it's why some pick-off is un-dodgeable (matching the realized WC/SPREAD markout of −0.135c = the residual you eat).
+
+**Transferable rule for the soccer pilot:** monitor trailing trade-rate / flow-magnitude / mid-vol; on a spike, PULL the quote (don't lean) — a goal-driven pick-off is imminent and its direction isn't flow-predictable. Combine a modest spread cushion with a fast pull-on-surge, and expect a small un-dodgeable residual. This is the non-soccer data's real payoff: the toxic markets we can't trade are the training ground for the risk rule that protects the one we can. ruff+mypy clean. (Snapshots autocorrelate — a jump spawns a cluster as the 30s window slides — so the AUC is optimistic as a fresh-event predictor; the day-block CI covers the directional claim and the pattern replicates across 4 sports, so the qualitative verdict is robust.)
+
+---
+
 ## 2026-07-31 — code review of the edge-scan work: 15 findings fixed; corrected re-runs confirm both nulls (and the MVE magnitude was overstated)
 
 Ran an xhigh multi-agent code review (correctness + cleanup + fresh-eyes sweep) over the working-tree diff (breadth axis + the two new research scripts). The **breadth-axis production change was triple-confirmed CLEAN** (SQL↔Python parity, dbt grain/uniqueness, tests all hold) — every one of the 15 findings was in the two *standalone research scripts*, and all are fixed.
