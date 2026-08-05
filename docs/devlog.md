@@ -4,6 +4,18 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-08-05 — retarget capture to soccer (fix the crowding) + zero-capital paper pilot made soccer-targetable
+
+Two operational moves off the "collection is soccer-starved" finding.
+
+**Retarget the capture (ws-capture.yml).** After 14 capture days, no soccer family has reached the 8-day verdict floor (leader Brasileirão stuck at 7 days for ~5 days) because `discover_markets` ranks by recent trade count and caps at 40 — frequent-scoring MLB/tennis out-trade sparse soccer and crowd it out of the `--wide` board (the review's flag, now quantified: **only 2 of the last 1,000 trades were soccer today — 0.2%**, so soccer is effectively invisible to `--wide`). Fix: the two Americas-evening windows (00:00 + 02:00 UTC) now capture **SOCCER-ONLY** (`--prefix` = the 17 club-soccer prefixes), so the cap=40 fills with soccer instead of MLB/tennis; the 19:00 + 23:00 windows stay `--wide` for the toxic controls. Prefix is branched on `github.event.schedule`. This is the only way the hypothesis families accumulate capture days at a useful rate. Minutes note: +1 window/day (4 total) — modest, worth watching against the private-repo Actions budget.
+
+**Zero-capital live test (Derek's "test live without real money").** `ml/lp/lp_paper_pilot.py` already does exactly this: it quotes a maker at the touch against the LIVE Kalshi book and SIMULATES fills — no capital, and no trading key (all public market data) — measuring realized capture + markout at seconds resolution. Honest limit: the fill RATE is an optimistic upper bound (queue position unknowable on paper) so it can't reach CONFIRMED, but the MARKOUT/toxicity is real and queue-independent. It can de-risk the pilot, measure soccer toxicity at fill resolution, and kill the idea cheaply if even the optimistic case is net-negative. Made it soccer-targetable (added `--prefix`). Crucially it runs AUTONOMOUSLY (no money, no Derek present), unlike the real pilot — so it's the zero-capital path to gather soccer evidence between now and the real MEX pilot. Couldn't demo meaningfully today: the only live soccer is a thin midweek UCL-Women qualifier (the good club leagues — Liga MX / MLS / Brasileirão — play weekends), and the auto-pick found no makeable soccer book. The tool is ready for the next live club game.
+
+ruff+mypy clean, 73 pytest pass.
+
+---
+
 ## 2026-08-04 — pick-off dynamics: the jump has a strong microstructure WARNING, but it's a PULL signal (no direction) with short lead time
 
 Built `ml/research/pickoff_dynamics.py` to answer the question the soccer pilot's risk management hinges on, using the abundant *toxic* non-soccer capture as the training ground: MLB at-bats and tennis points are FREQUENT, so they're the best data to characterize the pick-off (soccer goals are too rare to study directly), and the rule transfers. For each frequent-scoring sport over ~12 capture days from `fct_ws_markout`: is the next-30s pick-off jump front-run by observable microstructure, or is it a news surprise?

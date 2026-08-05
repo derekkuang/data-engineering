@@ -13,9 +13,10 @@ name: ws in-play capture
 
 on:
   schedule:
-    - cron: "0 19 * * *"   # ~afternoon Europe / midday US
-    - cron: "0 23 * * *"   # ~evening Europe / afternoon US
-    - cron: "0 2 * * *"    # ~evening US
+    - cron: "0 19 * * *"   # ~afternoon Europe / midday US        -> --wide (controls + Euro board)
+    - cron: "0 23 * * *"   # ~evening Europe / afternoon US        -> --wide (controls + US board)
+    - cron: "0 0 * * *"    # ~prime Americas club-soccer kickoff   -> SOCCER-only capture
+    - cron: "0 2 * * *"    # ~late Americas club soccer            -> SOCCER-only capture
   workflow_dispatch:
     inputs:
       minutes:
@@ -64,12 +65,24 @@ jobs:
         run: uv sync --frozen
 
       - name: Capture in-play microstructure
-        # --wide = the MEASUREMENT universe: keeps known-toxic families (ITF, MATCH/GAME) as
-        # labeled markout controls. The maker's trading gate stays narrow; only capture widens.
+        # --wide = the MEASUREMENT universe (keeps known-toxic ITF/MATCH/GAME as labeled markout
+        # controls). The two Americas-evening windows instead capture SOCCER-ONLY (--prefix soccer):
+        # frequent-scoring MLB/tennis out-trade sparse soccer and crowd it out of the cap=40 under
+        # --wide (the review's flag + the measured "soccer stuck at 5-7 capture days"), so a
+        # soccer-prefixed window is the only way the hypothesis families reliably accumulate days.
+        # Controls stay in the two --wide windows. The maker's TRADING gate is unchanged; only
+        # capture is retargeted. Prefix is chosen by which cron fired (github.event.schedule).
         run: |
-          ARGS="--minutes $CAPTURE_MINUTES --wide"
-          if [ -n "$CAPTURE_PREFIX" ]; then ARGS="$ARGS --prefix $CAPTURE_PREFIX"; fi
-          uv run python -m ml.lp.ws_features $ARGS
+          SOCCER="KXMLS,KXLIGAMX,KXBRASILEIRO,KXCOPADOBRASIL,KXALLSVENSKAN,KXELITESERIEN,KXDENSUPERLIGA,KXEPL,KXLALIGA,KXSERIEA,KXBUNDESLIGA,KXLIGUE1,KXUCL,KXUEL,KXEREDIVISIE,KXEFLCHAMPIONSHIP,KXSAUDIPL"
+          PREFIX="$CAPTURE_PREFIX"
+          case "${{ github.event.schedule }}" in
+            "0 0 * * *"|"0 2 * * *") PREFIX="$SOCCER" ;;
+          esac
+          if [ -n "$PREFIX" ]; then
+            uv run python -m ml.lp.ws_features --minutes "$CAPTURE_MINUTES" --wide --prefix "$PREFIX"
+          else
+            uv run python -m ml.lp.ws_features --minutes "$CAPTURE_MINUTES" --wide
+          fi
 
       # The capture step outlives the 1-hour OIDC session (90+ min), so the job-start
       # credentials are EXPIRED by the time we upload. Re-exchange the OIDC token for a
