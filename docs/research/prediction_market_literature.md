@@ -82,6 +82,14 @@ Our measured results are textbook instances of the literature, not method artifa
    `altcoin_efficiency.py` market-internal pattern — price + outcome, no new ingestion — on resolved Kalshi
    politics). Caveats: it's a DIRECTIONAL/hold strategy (not the MM survivor), slow-resolving (capital tied for
    months), sharp-competed, and the "compression" is a working-paper result that could be a selection artifact.
+   **→ MEASURED 2026-08-06 (`ml/research/politics_calibration.py`, 3,968 resolved markets / 678 races): the
+   mispricing is REAL and SIGNIFICANT on our data — compression slope 1.25 [1.15,1.39] (CI > 1), ECE 0.026 vs
+   crypto's ~0.007, 70–80c favorites win ~82% (priced 75%) — the first non-null price bias of the whole hunt.
+   BUT it is NOT a tradeable taker edge: buying the underpriced favorites at the ask net of fee LOSES at every
+   cutoff (−0.8% to −2.3%/ct, event-block CI entirely below 0). The mid-underpricing is trapped inside/overwhelmed
+   by the spread + fee. Confirms the literature AND extends "efficient to the limits of arbitrage" to politics.
+   Unclosed door: a MAKER (captures spread, compression = tailwind) could harvest the mid-mispricing — but that's
+   a slow, capital-heavy, directional-inventory game, not the fast-scoring sports-MM survivor.**
 2. **Reproduce the domain-calibration map on our own universe** — a pure-DE deliverable (calibration by category
    across all Kalshi series) valuable regardless of edge, and it independently validates/refutes the 353M-trade
    study on our data + shows WHERE any mispricing lives.

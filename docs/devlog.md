@@ -4,6 +4,18 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-08-06 — politics-calibration probe: the mispricing is REAL and significant, but trapped in the spread+fee
+
+Built `ml/research/politics_calibration.py` to test the one lead from the prediction-market literature review (`docs/research/prediction_market_literature.md`) where the documented mispricing looked *bigger than the friction*: politics is the worst-calibrated Kalshi domain (arXiv 2602.19520 — ECE 0.117, prices compressed toward 50%, favorites underpriced). Market-internal (a decision-time price + the realized outcome — NO new ingestion), reusing the `favorite_longshot` pattern: enumerate political series (Politics/Elections/World/Economics), collect settled markets, take the daily-candle price ~7 days before close, and measure calibration + a logistic compression slope + a cost-aware favorite-buying backtest with **EVENT-BLOCK** bootstrap CIs (resample the RACE, not the candidate-market — the candidate YES-markets within a race sum to ~1 and aren't independent).
+
+**RESULT (3,968 resolved markets / 678 races, price 7d pre-close):**
+- **The mispricing is REAL and SIGNIFICANT — the first non-null price bias of the whole hunt.** Compression slope **1.25 [1.15, 1.39]** (event-block CI entirely above 1): prices compressed toward 50%, favorites underpriced — exactly the literature's claim, replicated on our own data. ECE **0.026** vs crypto's ~0.007. The calibration curve confirms it: 70–80c favorites win ~82% (priced 75%); longshots win *less* than priced. This is the OPPOSITE of our crypto-15min result (perfectly calibrated, bias null).
+- **But it is NOT a tradeable taker edge — a SIGNIFICANT loss net of costs.** Buying the underpriced favorites at the ASK net of the Kalshi fee loses at *every* depth cutoff: mean **−0.8% to −2.3%/contract, event-block CI ENTIRELY BELOW ZERO** (e.g. cutoff 0.90: −0.79% [−1.37%, −0.30%]; cutoff 0.70: −0.94% [−1.81%, −0.02%]). The mid-underpricing (a few points) is trapped inside — and overwhelmed by — the spread + fee: you pay the half-spread + fee to buy a 91–98%-win near-certainty, and that exceeds the underpricing.
+
+**VERDICT:** politics is the one domain where a real, statistically-significant mispricing exists on our data (confirming the peer literature) — AND it dies the same way everything else did: **trapped in friction**. This extends the project's "efficient to the limits of arbitrage" thesis to the ONE category that looked like the exception, with our own event-block-bootstrapped evidence. The only unclosed door: the underpricing is a MID-price phenomenon, so a MAKER (capturing the spread rather than paying it, with compression as a tailwind) could in principle harvest it — but political favorites are slow-resolving (months of directional inventory), capital-heavy, and a fundamentally different game than the fast-scoring sports-MM survivor. Not recommended; noted honestly. The platform now has, on its own data, the full domain-calibration story the 353M-trade study found (politics mispriced ≫ crypto/sports efficient). ruff+mypy clean.
+
+---
+
 ## 2026-08-05 — retarget capture to soccer (fix the crowding) + zero-capital paper pilot made soccer-targetable
 
 Two operational moves off the "collection is soccer-starved" finding.
