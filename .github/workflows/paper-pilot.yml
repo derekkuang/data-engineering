@@ -1,0 +1,72 @@
+name: paper-pilot (zero-capital soccer test)
+
+# Autonomous ZERO-MONEY test of the club-soccer maker edge. Runs ml.lp.lp_paper_pilot at weekend
+# club-soccer windows: it quotes a maker at the touch against the LIVE Kalshi book and SIMULATES
+# fills (no capital at risk, no trading key — all PUBLIC market data), measuring realized capture +
+# markout at seconds resolution on the most active live club-soccer game. The result is appended to
+# docs/paper_pilot_findings.md and committed (with [skip ci] so it doesn't re-trigger the build).
+#
+# Fill RATE is an optimistic upper bound (queue ignored -> de-risks, can't CONFIRM); MARKOUT is real.
+# Runs EVERY weekend until removed/disabled (this is the ongoing zero-money evidence stream). GitHub
+# runs scheduled workflows only on the default branch. Manually triggerable via workflow_dispatch.
+
+on:
+  schedule:
+    - cron: "0 1 * * 6,0,1"   # 01:00 UTC Sat/Sun/Mon — Fri/Sat/Sun-night Americas club soccer
+    - cron: "0 3 * * 6,0,1"   # 03:00 UTC Sat/Sun/Mon — late Americas club soccer
+    - cron: "0 18 * * 6,0"    # 18:00 UTC Sat/Sun — weekend afternoon (Scandi/European/MLS)
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "paper-pilot minutes"
+        default: "30"
+
+# Never run two paper pilots at once (they append to the same findings file).
+concurrency:
+  group: paper-pilot
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # commit the findings file back to the repo
+
+jobs:
+  paper-pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # Public market-data endpoint — NO auth/key needed (the pilot reads the book + trade tape only).
+      KALSHI_API_BASE: https://external-api.kalshi.com/trade-api/v2
+      MINUTES: ${{ inputs.minutes || '30' }}
+      SOCCER: "KXMLS,KXLIGAMX,KXBRASILEIRO,KXCOPADOBRASIL,KXALLSVENSKAN,KXELITESERIEN,KXDENSUPERLIGA,KXEPL,KXLALIGA,KXSERIEA,KXBUNDESLIGA,KXLIGUE1,KXUCL,KXUEL,KXEREDIVISIE,KXEFLCHAMPIONSHIP,KXSAUDIPL"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (locked)
+        run: uv sync --frozen
+
+      - name: Paper-pilot on the live club-soccer board (zero capital)
+        run: |
+          {
+            echo ""
+            echo "## $(date -u +'%Y-%m-%d %H:%M UTC') — paper pilot (soccer)"
+            echo '```'
+          } >> docs/paper_pilot_findings.md
+          # `|| true`: a window with no live/makeable soccer exits non-zero — still record it.
+          uv run python -m ml.lp.lp_paper_pilot --prefix "$SOCCER" --minutes "$MINUTES" \
+            2>&1 | tee -a docs/paper_pilot_findings.md || true
+          echo '```' >> docs/paper_pilot_findings.md
+
+      - name: Commit findings
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/paper_pilot_findings.md
+          # [skip ci] so the findings commit doesn't re-trigger the dbt/pytest build.
+          git diff --cached --quiet || git commit -m "paper-pilot findings $(date -u +%F-%H%M) [skip ci]"
+          git push
