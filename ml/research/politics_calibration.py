@@ -14,11 +14,12 @@ reusing the exact favorite-longshot pattern:
      longshots (low price) winning LESS.
   2. COMPRESSION SLOPE — a logistic fit outcome ~ logit(price). slope > 1 = underconfident
      (compressed toward 50%, favorites underpriced) = the literature's claim; ~1 = calibrated.
-  3. TRADEABILITY — the decisive test: buy the FAVORITE side (price > cutoff) at its ask, net of
-     the Kalshi fee, swept across depth cutoffs. If favorites are underpriced this PROFITS
-     (unlike the crypto case, where it lost). CI is EVENT-BLOCK bootstrapped (resample the RACE,
-     not the candidate-market — the candidate YES-markets within one race sum to ~1 and are NOT
-     independent; the honest unit is the event).
+  3. TRADEABILITY — buy the FAVORITE side (price > cutoff), HELD to resolution, under THREE entry
+     regimes: TAKER@ask (pay the spread + taker fee — the naive test), MID (compression edge
+     alone), and MAKER@bid (rest a bid, capture the full spread — the maker UPPER BOUND, since the
+     taker lost BECAUSE it paid the spread the maker instead earns). CIs are EVENT-BLOCK
+     bootstrapped (resample the RACE, not the candidate-market — within-race YES-markets sum to ~1
+     and are NOT independent). MAKER@bid is gross of news-toxicity + months of inventory.
 
 Decision-time price = the daily candle close at ~`--horizon-days` before the market's close
 (genuine uncertainty; the closing price is near-deterministic and useless for calibration).
@@ -42,8 +43,7 @@ import numpy.typing as npt
 from dotenv import load_dotenv
 from sklearn.linear_model import LogisticRegression
 
-from ingestion.kalshi import KalshiClient
-from ml.alpha.backtest import _per_window_pnl
+from ingestion.kalshi import KalshiClient, kalshi_taker_fee
 from ml.alpha.metrics import reliability_table, score
 
 POLITICAL_CATEGORIES = ("Politics", "Elections", "World", "Economics")
@@ -128,7 +128,10 @@ def collect(client: KalshiClient, days: int, horizon_days: float,
             continue
         for m in mkts:
             checked += 1
-            o = decision_obs(client, st, m, horizon_days)
+            try:
+                o = decision_obs(client, st, m, horizon_days)
+            except Exception:  # noqa: BLE001 — a transient candlestick failure skips one market,
+                continue       # not the whole (10-min) collection
             if o is not None:
                 obs.append(o)
         if (i + 1) % 200 == 0:
@@ -196,6 +199,8 @@ def main() -> int:
     ap.add_argument("--horizon-days", type=float, default=7.0, help="decision point before close")
     ap.add_argument("--max-series", type=int, default=5000)
     ap.add_argument("--max-markets", type=int, default=3000)
+    ap.add_argument("--maker-fee-frac", type=float, default=0.0,
+                    help="maker fee as a fraction of the taker fee (0 = maker-free)")
     args = ap.parse_args()
 
     load_dotenv()
@@ -212,7 +217,7 @@ def main() -> int:
     price = np.array([o.price for o in obs])
     outcome = np.array([o.outcome for o in obs], dtype=int)
     yes_ask = np.array([o.yes_ask for o in obs])
-    no_ask = 1.0 - np.array([o.yes_bid for o in obs])
+    yes_bid = np.array([o.yes_bid for o in obs])
     events = [o.event for o in obs]
     rng = np.random.default_rng(7)
 
@@ -234,32 +239,46 @@ def main() -> int:
     print(tbl[tbl["n"] >= 5].to_string(index=False,
           float_format=lambda x: f"{x:.3f}"))
 
-    print("\nTRADEABILITY — BUY THE FAVORITE (side priced > cutoff) at its ask, net of Kalshi fee:")
-    print(f"  {'cutoff':>7}{'bets':>7}{'win%':>7}{'mean pnl/ct($)':>16}{'ROI':>9}"
-          f"{'  event-block 95% CI ($/ct)':>28}")
+    # Three entry regimes for the favorite side, HELD to resolution:
+    #   TAKER@ask = pay the ask + taker fee (the earlier sweep — LOSES).
+    #   MID       = enter at the mid: the compression edge ALONE (no spread paid or captured).
+    #   MAKER@bid = rest a bid, get filled at the bid = capture the FULL spread. The maker UPPER
+    #     bound — assumes you get filled (fill-rate optimism, per lp_paper_pilot), and is GROSS of
+    #     news-toxicity + the MONTHS of directional inventory a political hold ties up.
+    # NO-favorite (price<0.5) mirrors the YES book: no_ask=1-yes_bid, no_bid=1-yes_ask.
     fav_is_yes = price >= 0.5
-    for thr in FAVORITE_CUTOFFS:
-        fav_prob = np.where(fav_is_yes, price, 1.0 - price)
-        q = fav_prob > thr
-        bet_yes = q & fav_is_yes
-        bet_no = q & ~fav_is_yes
-        pnl, staked = _per_window_pnl(bet_yes, bet_no, outcome, yes_ask, no_ask)
-        sel = bet_yes | bet_no
-        if sel.sum() < 8:
-            print(f"  {thr:>7.2f}{int(sel.sum()):>7}   (too few)")
-            continue
-        sub_pnl = pnl[sel]
-        sub_ev = [e for e, k in zip(events, sel, strict=True) if k]
-        wins = ((bet_yes & (outcome == 1)) | (bet_no & (outcome == 0)))[sel]
-        roi = sub_pnl.sum() / staked[sel].sum() if staked[sel].sum() else float("nan")
-        point, lo, hi = _event_block_ci(sub_pnl, sub_ev, rng)
-        print(f"  {thr:>7.2f}{int(sel.sum()):>7}{wins.mean():>7.0%}{sub_pnl.mean():>+16.4f}"
-              f"{roi:>+9.2%}   [{lo:+.4f},{hi:+.4f}] ({len(set(sub_ev))}ev)")
+    fav_win = np.where(fav_is_yes, outcome, 1 - outcome).astype(float)
+    fav_prob = np.where(fav_is_yes, price, 1.0 - price)
 
-    print("\nRead: ECE >> crypto's ~0.007 + a compression slope CI above 1 = the lit's politics")
-    print("mispricing is present here. It's TRADEABLE only if a favorite-cutoff row shows mean")
-    print("pnl/ct with an event-block CI ENTIRELY above 0 (clears spread + fee). A positive point")
-    print("that straddles 0 = real bias, still trapped in friction — the usual wall.")
+    def regime_pnl(entry: FloatArr, maker: bool) -> FloatArr:
+        frac = args.maker_fee_frac if maker else 1.0
+        fee = np.array([kalshi_taker_fee(e) for e in entry]) * frac
+        return fav_win - entry - fee
+
+    regimes = {
+        "TAKER@ask": regime_pnl(np.where(fav_is_yes, yes_ask, 1.0 - yes_bid), maker=False),
+        "MID": regime_pnl(np.where(fav_is_yes, price, 1.0 - price), maker=True),
+        "MAKER@bid": regime_pnl(np.where(fav_is_yes, yes_bid, 1.0 - yes_ask), maker=True),
+    }
+    print("\nTRADEABILITY — buy the favorite (price > cutoff), HOLD to resolution. mean pnl/ct +")
+    print("event-block 95% CI. TAKER pays spread; MID neither; MAKER captures it (upper bound):")
+    print(f"  {'cutoff':>6}{'bets':>6}   " + "".join(f"{r:>25}" for r in regimes))
+    for thr in FAVORITE_CUTOFFS:
+        q = fav_prob > thr
+        if int(q.sum()) < 8:
+            print(f"  {thr:>6.2f}{int(q.sum()):>6}   (too few)")
+            continue
+        ev = [e for e, k in zip(events, q, strict=True) if k]
+        cells = "".join(
+            f"{p:+.4f}[{lo:+.3f},{hi:+.3f}]".rjust(25)
+            for p, lo, hi in (_event_block_ci(pnl[q], ev, rng) for pnl in regimes.values())
+        )
+        print(f"  {thr:>6.2f}{int(q.sum()):>6}   {cells}")
+
+    print("\nRead: MID isolates the compression edge (net of fee, no spread). MAKER@bid adds full")
+    print("spread capture = the MAKER UPPER BOUND. If MAKER@bid's CI doesn't clear 0, it's")
+    print("closed for a maker too. If it DOES, compression is a gross tailwind — but still")
+    print("gross of news-toxicity + MONTHS of directional inventory (the real killers).")
     return 0
 
 

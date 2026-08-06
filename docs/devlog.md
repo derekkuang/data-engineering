@@ -4,6 +4,21 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-08-07 — politics MAKER probe: the compression IS a gross-positive maker edge (the FIRST of the whole hunt), but gross of the real killers
+
+Extended `ml/research/politics_calibration.py` to the MAKER version the taker result pointed to: buy the underpriced favorites at THREE entry regimes, HELD to resolution — TAKER@ask (pay spread + taker fee), MID (compression alone, maker-free), MAKER@bid (rest a bid, capture the full spread = the maker UPPER BOUND, since the taker lost BECAUSE it paid the spread a maker instead earns). Event-block CIs (resample the race). Also hardened `collect()` to skip a transient candlestick failure — a network blip had been nuking the whole 10-min collection (it caught `list_markets` errors but not the per-market candlestick call).
+
+**RESULT (2,612 resolved markets, price 7d pre-close; compression slope 1.33 [1.20,1.53]):**
+- **TAKER@ask: wash-to-slightly-negative** (CIs straddle 0 at cutoffs ≥0.6; ~0 to −1.2%/ct) — the taker isn't an edge (pays the spread + fee).
+- **MID: significantly POSITIVE, CIs ENTIRELY above 0** (+2.1% to +3.6%/ct; e.g. cutoff 0.70 +3.3% [+2.3,+4.2]). Entering at the mid — the compression edge ALONE, maker-free — profits.
+- **MAKER@bid: even more positive, CIs ENTIRELY above 0** (+3.4% to +7.3%/ct; cutoff 0.70 +5.4% [+4.3,+6.3]). A maker capturing the full spread earns strongly, gross.
+
+**This is the FIRST gross-positive edge of the entire hunt** — every prior axis failed even gross; here the mispricing clears the gross bar decisively (MID and MAKER@bid CIs entirely above 0). The taker lost only because it PAID the spread the maker instead earns. BUT it is GROSS of the three real killers the number can't see: (1) **fill-rate + adverse selection** — MAKER@bid assumes you get filled at the bid (an upper bound, per `lp_paper_pilot`), and real fills are adversely selected (you fill preferentially right before bad news); (2) **news-toxicity** — political favorites jump on news → the resting maker is picked off (the exact channel our pick-off study characterized, which ate most of soccer's gross spread); (3) **months of directional inventory** — political markets resolve over MONTHS, so the ~+3–7%/contract is a return over a months-long hold with capital locked up and no recycling. Plus competition: the liquid markets (where you'd get filled) are tight-spread; the wide ones (best gross) are thin.
+
+**VERDICT: politics is NOT closed for a maker at the GROSS level — the first lead in the whole hunt to clear that bar.** Whether it survives NET (of fill-rate/adverse-selection + news-toxicity + months-long inventory) is the genuinely open question, and the honest prior — from the soccer MM, where goal-toxicity ate most of a comparable gross spread — is that news-toxicity + fill-rate eat a large chunk. But it's the one thing worth a closer look, because unlike everything else it didn't die gross. Clean ways to resolve it, cheaply: (a) measure the news-jump toxicity of political favorites (reuse the pick-off-dynamics idea on political price paths), and/or (b) **paper-make** a few political favorites (zero-capital, exactly like the soccer paper pilot). Still a slow directional-inventory game, NOT the fast sports-MM survivor. ruff+mypy clean.
+
+---
+
 ## 2026-08-06 — politics-calibration probe: the mispricing is REAL and significant, but trapped in the spread+fee
 
 Built `ml/research/politics_calibration.py` to test the one lead from the prediction-market literature review (`docs/research/prediction_market_literature.md`) where the documented mispricing looked *bigger than the friction*: politics is the worst-calibrated Kalshi domain (arXiv 2602.19520 — ECE 0.117, prices compressed toward 50%, favorites underpriced). Market-internal (a decision-time price + the realized outcome — NO new ingestion), reusing the `favorite_longshot` pattern: enumerate political series (Politics/Elections/World/Economics), collect settled markets, take the daily-candle price ~7 days before close, and measure calibration + a logistic compression slope + a cost-aware favorite-buying backtest with **EVENT-BLOCK** bootstrap CIs (resample the RACE, not the candidate-market — the candidate YES-markets within a race sum to ~1 and aren't independent).

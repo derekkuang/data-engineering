@@ -90,6 +90,14 @@ Our measured results are textbook instances of the literature, not method artifa
    by the spread + fee. Confirms the literature AND extends "efficient to the limits of arbitrage" to politics.
    Unclosed door: a MAKER (captures spread, compression = tailwind) could harvest the mid-mispricing — but that's
    a slow, capital-heavy, directional-inventory game, not the fast-scoring sports-MM survivor.**
+   **→ MAKER version MEASURED 2026-08-07 (3 entry regimes, held to resolution): the gross edge IS there —
+   entering at the MID (compression alone, maker-free: +2.1–3.6%/ct) or the BID (full spread capture: +3.4–7.3%/ct)
+   has event-block CIs ENTIRELY above 0, while the TAKER@ask washes/loses. This is the FIRST gross-positive edge of
+   the entire hunt (everything else died even gross). BUT it's gross of the three real killers: fill-rate +
+   adverse-selection (MAKER@bid assumes you fill at the bid), news-toxicity (favorites jump on news → picked off,
+   the channel that ate most of soccer's gross spread), and MONTHS of directional inventory (capital lock-up).
+   NET question genuinely open — the one lead worth a closer look. Cheap next test: paper-make political favorites
+   (zero-capital, like the soccer paper pilot) or measure their news-jump toxicity.**
 2. **Reproduce the domain-calibration map on our own universe** — a pure-DE deliverable (calibration by category
    across all Kalshi series) valuable regardless of edge, and it independently validates/refutes the 353M-trade
    study on our data + shows WHERE any mispricing lives.
