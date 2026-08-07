@@ -13,3 +13,23 @@ not a single thin session. Scheduled by `.github/workflows/paper-pilot-politics.
 **Newest entries appended below.**
 
 ---
+
+## 2026-08-07 — paper pilot (politics) [initial manual run]
+```
+PAPER LP PILOT — KXDROPOUTPRIMARY-26-MMIL2
+======================================================================
+ran 11.9 min, 179 polls, avg spread 1.2c
+(upper-bound) fills: 96   buys: 16   sells: 80   net inventory: -64
+
+gross edge captured (Σ side·(mid−fill)) : +96.0c over 96 fills = +1.00c/fill
+ horizon  fills w/ mark   mean markout   mean net pnl
+-----------------------------------------------------
+    15s             96         -0.33c         +0.67c
+    30s             96         -0.33c         +0.67c
+    60s             96         +0.00c         +1.00c
+
+Read: markout<0 = adverse selection (toxic); net pnl = edge + markout per
+fill. POSITIVE net across horizons => a maker plausibly profits here -> a real
+Phase-B candidate. Reminder: fill rate is an UPPER BOUND (queue ignored); only
+live resting orders (Phase B) give the true rate. Markout is queue-independent.
+```
