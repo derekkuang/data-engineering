@@ -2,8 +2,10 @@
 
 Autonomous, **zero-money** test of the politics-maker lead (`ml/research/politics_calibration.py` found the
 compression is a GROSS-positive maker edge — favorites underpriced — but gross of news-toxicity + fill-rate +
-months of inventory). Each run paper-makes the most-active political favorite against the **live** book
-(simulated fills, no capital, no key — public data), measuring realized capture + **markout**.
+months of inventory). Each run paper-makes the **10 most-active political favorites at once** against the
+**live** book (`--markets 10`; simulated fills, no capital, no key — public data), measuring realized
+capture + **markout**. Fills pool across markets so the slow politics markout accumulates ~10× faster;
+markout is queue-independent so pooling is honest (each fill is still marked vs its own market's mid).
 
 **What to read:** the **markout** is the key net-question input — how toxic is political-favorite flow (does
 the price move against a resting maker after a fill)? If markout is strongly negative → news-toxicity eats the

@@ -4,6 +4,18 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-08-07 — politics paper-maker goes MULTI-MARKET: ~10× faster markout accumulation on the one open lead
+
+Acted on the handoff's #1 flagged improvement. The politics-maker NET question — does news-toxicity + fill-rate + months-of-inventory eat the +2–7c/ct *gross* maker edge? — is gated on one number: the **markout** (queue-independent adverse selection). But the paper-pilot only quoted **one** market per session, and politics trades slowly (the seed run got 96 fills in ~12 min on a single market), so a real markout distribution was weeks away.
+
+**Change: `--markets N` on `ml/lp/lp_paper_pilot.py`.** It now picks the top-N most-active *makeable* favorites at once (`pick_benign_tickers`, spread-filtered 2–15c, series-set-matched for politics), polls all N each sweep, and **pools** the markout across markets — each fill is still marked against *its own* market's mid path, so pooling grows the fill sample without mixing trajectories. Report adds a per-market breakdown (fills / net inv / gross-per-fill) so you can see concentration; single-market output is byte-identical (backward-compatible). Wired the daily politics workflow (`paper-pilot-politics.yml`) to `--markets 10 --poll 6`.
+
+**Verified two ways.** (1) Extracted the net-question arithmetic into a pure `markout_rows()` and added the *first* unit tests for the paper pilot (`tests/test_lp_paper_pilot.py`, 5 tests: top-N picker + spread filter + series-set override, fill-sim + trade-id dedup, and the pooled-markout math across two markets). (2) **Live 30s broad-board probe: it picked 4 makeable markets and pooled 283 fills** (2 ITF-tennis + an MLB spread) — vs 96 fills in 12 *minutes* single-market, i.e. ~35× the fill rate in that busy window. Politics itself was pre-market-quiet at 10:00 UTC (picker correctly returned "nothing makeable"); the scheduled run fires at 20:00 UTC when political markets are active.
+
+**Impact:** the autonomous daily politics net-test now gathers ~10× the markout sample per session, so the gating input — is political-favorite maker flow toxic (markout ≪ 0, as goal-flow was for soccer) or benign (edge survives)? — resolves in **days, not weeks**. No new claim about the edge yet; this is the instrument that will produce the read. ruff+mypy clean, 78 pytest pass.
+
+---
+
 ## 2026-08-07 — politics MAKER probe: the compression IS a gross-positive maker edge (the FIRST of the whole hunt), but gross of the real killers
 
 Extended `ml/research/politics_calibration.py` to the MAKER version the taker result pointed to: buy the underpriced favorites at THREE entry regimes, HELD to resolution — TAKER@ask (pay spread + taker fee), MID (compression alone, maker-free), MAKER@bid (rest a bid, capture the full spread = the maker UPPER BOUND, since the taker lost BECAUSE it paid the spread a maker instead earns). Event-block CIs (resample the race). Also hardened `collect()` to skip a transient candlestick failure — a network blip had been nuking the whole 10-min collection (it caught `list_markets` errors but not the per-market candlestick call).

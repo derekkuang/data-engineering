@@ -7,9 +7,10 @@ name: paper-pilot politics (zero-capital maker-toxicity test)
 # The MARKOUT is the key net-question input: how toxic is political-favorite flow (does the price move
 # against a resting maker)? Result appended to docs/paper_pilot_findings_politics.md, committed [skip ci].
 #
-# Politics trades SLOWLY (few fills/session) so this accumulates over many days — the honest way to a
-# net read. ONE modest run/day to limit Actions minutes; disable (delete the schedule) when done, or
-# widen if minutes allow. A multi-market version (quote many favorites at once) would accumulate faster.
+# Politics trades SLOWLY per market, so we quote the 10 most-active favorites AT ONCE (--markets 10):
+# fills pool across markets and the markout accumulates ~10x faster — still the honest net read (markout
+# is queue-independent). ONE modest run/day to limit Actions minutes; disable (delete the schedule) when
+# done, or widen --markets/--minutes if minutes allow.
 
 on:
   schedule:
@@ -51,7 +52,7 @@ jobs:
             echo '```'
           } >> docs/paper_pilot_findings_politics.md
           uv run python -m ml.lp.lp_paper_pilot --category "Politics,Elections,World,Economics" \
-            --minutes "$MINUTES" 2>&1 | tee -a docs/paper_pilot_findings_politics.md || true
+            --markets 10 --poll 6 --minutes "$MINUTES" 2>&1 | tee -a docs/paper_pilot_findings_politics.md || true
           echo '```' >> docs/paper_pilot_findings_politics.md
       - name: Commit findings
         run: |

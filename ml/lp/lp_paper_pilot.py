@@ -29,6 +29,9 @@ from the live trade feed, or pass --ticker.
 Usage:
     uv run python -m ml.lp.lp_paper_pilot --minutes 20
     uv run python -m ml.lp.lp_paper_pilot --ticker KXMLBGAME-26JUN15... --minutes 30
+    # quote 10 political favorites at once (pools fills -> markout accumulates ~10x faster):
+    uv run python -m ml.lp.lp_paper_pilot --category Politics,Elections,World,Economics \
+        --markets 10 --poll 6 --minutes 25
 """
 
 from __future__ import annotations
@@ -100,13 +103,14 @@ def best_bid_ask(book: dict[str, Any]) -> tuple[float, float] | None:
     return max(yb), round(1.0 - max(nb), 4)
 
 
-def pick_benign_ticker(client: KalshiClient, prefixes: tuple[str, ...] | None = None,
-                       series_set: set[str] | None = None) -> str | None:
-    """Most actively-trading benign market right now, from the live trade feed. ``prefixes``
-    restricts the universe (e.g. club-soccer prefixes); ``series_set`` (a set of series tickers,
-    e.g. all political series from list_series-by-category) OVERRIDES the prefix match — politics
-    has thousands of heterogeneous series, so match by series membership, not a prefix list.
-    Default = the broad benign board."""
+def pick_benign_tickers(client: KalshiClient, prefixes: tuple[str, ...] | None = None,
+                        series_set: set[str] | None = None, n: int = 1) -> list[str]:
+    """Up to ``n`` most actively-trading MAKEABLE benign markets right now, from the live trade
+    feed. ``prefixes`` restricts the universe (e.g. club-soccer prefixes); ``series_set`` (a set of
+    series tickers, e.g. all political series from list_series-by-category) OVERRIDES the prefix
+    match — politics has thousands of heterogeneous series, so match by series membership, not a
+    prefix list. Default = the broad benign board. Quoting several favorites at once is how the
+    slow politics markout accumulates in days rather than weeks (fills pool across markets)."""
     pfx = prefixes or ELIGIBLE_PREFIXES
     trades = client.get("/markets/trades", params={"limit": 1000}).get("trades", [])
     counts: Counter[str] = Counter()
@@ -118,12 +122,22 @@ def pick_benign_ticker(client: KalshiClient, prefixes: tuple[str, ...] | None = 
             else any(tk.startswith(p) for p in pfx)
         if matched:
             counts[tk] += 1
-    for tk, _ in counts.most_common(25):
+    picked: list[str] = []
+    for tk, _ in counts.most_common(max(25, 4 * n)):
         book = client.get_market_orderbook(tk)
         ba = best_bid_ask(book)
         if ba and 0.02 <= (ba[1] - ba[0]) <= 0.15:  # 2-15c spread = makeable, not broken
-            return tk
-    return None
+            picked.append(tk)
+            if len(picked) >= n:
+                break
+    return picked
+
+
+def pick_benign_ticker(client: KalshiClient, prefixes: tuple[str, ...] | None = None,
+                       series_set: set[str] | None = None) -> str | None:
+    """Single most-active makeable benign market (n=1 wrapper over pick_benign_tickers)."""
+    picked = pick_benign_tickers(client, prefixes, series_set, n=1)
+    return picked[0] if picked else None
 
 
 def poll_once(client: KalshiClient, p: Pilot) -> None:
@@ -164,44 +178,73 @@ def _mid_at(p: Pilot, ts: float) -> float | None:
     return None
 
 
-def report(p: Pilot) -> None:
-    dur = (p.mids[-1][0] - p.mids[0][0]) / 60.0 if len(p.mids) > 1 else 0.0
-    n = len(p.fills)
+def markout_rows(pilots: list[Pilot]) -> list[tuple[int, int, float, float]]:
+    """Pooled markout per horizon: (horizon_s, n_marked_fills, mean_markout_c, mean_net_c). Each
+    fill is marked against ITS OWN market's mid path (via _mid_at), then pooled across markets — the
+    honest way to grow the sample: markout is queue- and market-independent per fill. Horizons with
+    no marked fills are omitted. Pure (no I/O) so the net-question arithmetic is unit-testable."""
+    rows: list[tuple[int, int, float, float]] = []
+    for h in MARKOUT_HORIZONS:
+        marks, nets = [], []
+        for p in pilots:
+            for f in p.fills:
+                m_h = _mid_at(p, f.ts + h)
+                if m_h is None:
+                    continue
+                marks.append(f.side * (m_h - f.mid_at_fill) * 100.0)  # markout (cents)
+                nets.append(f.side * (m_h - f.price) * 100.0)  # edge + markout
+        if marks:
+            rows.append((h, len(marks), sum(marks) / len(marks), sum(nets) / len(nets)))
+    return rows
+
+
+def report(pilots: list[Pilot]) -> None:
+    """Pooled report over one-or-many quoted markets. Each fill's markout is computed against
+    ITS OWN market's mid path, then the markout/net numbers are pooled across markets — pooling is
+    the whole point of the multi-market mode: it grows the fill sample (tighter markout estimate)
+    without mixing mid trajectories. Single-market output is unchanged."""
+    multi = len(pilots) > 1
+    ident = pilots[0].ticker if not multi else f"{len(pilots)} markets"
+    starts = [p.mids[0][0] for p in pilots if p.mids]
+    ends = [p.mids[-1][0] for p in pilots if len(p.mids) > 1]
+    dur = (max(ends) - min(starts)) / 60.0 if ends and starts else 0.0
+    n_polls = sum(p.n_polls for p in pilots)
+    spread_sum = sum(p.spread_sum for p in pilots)
+    all_fills = [f for p in pilots for f in p.fills]
+    n = len(all_fills)
+    buys = sum(f.side > 0 for f in all_fills)
+    sells = sum(f.side < 0 for f in all_fills)
+    net_inv = sum(f.side for f in all_fills)
     print("\n" + "=" * 70)
-    print(f"PAPER LP PILOT — {p.ticker}")
+    print(f"PAPER LP PILOT — {ident}")
     print("=" * 70)
     print(
-        f"ran {dur:.1f} min, {p.n_polls} polls, avg spread "
-        f"{100 * p.spread_sum / max(p.n_polls, 1):.1f}c"
+        f"ran {dur:.1f} min, {n_polls} polls, avg spread "
+        f"{100 * spread_sum / max(n_polls, 1):.1f}c"
     )
-    print(
-        f"(upper-bound) fills: {n}   buys: {sum(f.side > 0 for f in p.fills)}   "
-        f"sells: {sum(f.side < 0 for f in p.fills)}   net inventory: {sum(f.side for f in p.fills)}"
-    )
+    print(f"(upper-bound) fills: {n}   buys: {buys}   sells: {sells}   net inventory: {net_inv}")
     if n == 0:
-        print("No fills — market too quiet this session; try a busier market/longer run.")
+        print("No fills — market(s) too quiet this session; try busier markets/a longer run.")
         return
 
-    edge = sum(f.side * (f.mid_at_fill - f.price) for f in p.fills) * 100.0  # cents
+    edge = sum(f.side * (f.mid_at_fill - f.price) for f in all_fills) * 100.0  # cents
     print(
         f"\ngross edge captured (Σ side·(mid−fill)) : {edge:+.1f}c over {n} fills "
         f"= {edge / n:+.2f}c/fill"
     )
     print(f"{'horizon':>8}{'fills w/ mark':>15}{'mean markout':>15}{'mean net pnl':>15}")
     print("-" * 53)
-    for h in MARKOUT_HORIZONS:
-        marks, nets = [], []
-        for f in p.fills:
-            m_h = _mid_at(p, f.ts + h)
-            if m_h is None:
+    for h, n_marks, mean_mark, mean_net in markout_rows(pilots):
+        print(f"{h:>6}s{n_marks:>15}{mean_mark:>+14.2f}c{mean_net:>+14.2f}c")
+
+    if multi:
+        print(f"\n{'per-market':>28}{'fills':>8}{'net inv':>9}{'gross/fill':>12}")
+        for p in sorted(pilots, key=lambda q: -len(q.fills)):
+            if not p.fills:
                 continue
-            marks.append(f.side * (m_h - f.mid_at_fill) * 100.0)  # markout (cents)
-            nets.append(f.side * (m_h - f.price) * 100.0)  # edge + markout
-        if marks:
-            print(
-                f"{h:>6}s{len(marks):>15}{sum(marks) / len(marks):>+14.2f}c"
-                f"{sum(nets) / len(nets):>+14.2f}c"
-            )
+            g = sum(f.side * (f.mid_at_fill - f.price) for f in p.fills) * 100.0 / len(p.fills)
+            inv = sum(f.side for f in p.fills)
+            print(f"{p.ticker[:28]:>28}{len(p.fills):>8}{inv:>+9}{g:>+11.2f}c")
 
     print("\nRead: markout<0 = adverse selection (toxic); net pnl = edge + markout per")
     print("fill. POSITIVE net across horizons => a maker plausibly profits here -> a real")
@@ -218,6 +261,9 @@ def main() -> int:
                     help="pick the most-active market in these Kalshi categories (e.g. Politics)")
     ap.add_argument("--minutes", type=float, default=20.0)
     ap.add_argument("--poll", type=float, default=POLL_SECONDS)
+    ap.add_argument("--markets", type=int, default=1,
+                    help="quote this many of the most-active makeable favorites at once "
+                         "(pools fills → the slow politics markout accumulates far faster)")
     args = ap.parse_args()
 
     client = KalshiClient(pace_seconds=0.1)
@@ -226,25 +272,33 @@ def main() -> int:
     if args.category:
         cats = {c.strip() for c in args.category.split(",")}
         series_set = {s["ticker"] for s in client.list_series() if s.get("category") in cats}
-    ticker = args.ticker or pick_benign_ticker(client, prefixes, series_set)
-    if not ticker:
+    if args.ticker:
+        tickers = [args.ticker]
+    else:
+        tickers = pick_benign_tickers(client, prefixes, series_set, n=max(1, args.markets))
+    if not tickers:
         print("No actively-trading benign market found right now. Pass --ticker.")
         return 1
-    print(f"Paper-quoting {ticker} for {args.minutes:.0f} min (poll {args.poll:.0f}s) ...")
+    label = tickers[0] if len(tickers) == 1 \
+        else f"{len(tickers)} markets ({', '.join(tickers[:3])}…)"
+    print(f"Paper-quoting {label} for {args.minutes:.0f} min (poll {args.poll:.0f}s) ...")
 
-    p = Pilot(ticker=ticker)
+    pilots = [Pilot(ticker=tk) for tk in tickers]
     end = time.time() + args.minutes * 60
+    sweeps = 0
     while time.time() < end:
         t0 = time.time()
-        try:
-            poll_once(client, p)
-        except Exception as exc:  # keep the session alive through transient API hiccups
-            print(f"  poll error: {str(exc)[:80]}")
-        if p.n_polls % 15 == 0 and p.n_polls:
-            print(f"  {p.n_polls} polls, {len(p.fills)} fills so far")
+        for p in pilots:
+            try:
+                poll_once(client, p)
+            except Exception as exc:  # keep the session alive through transient API hiccups
+                print(f"  poll error [{p.ticker}]: {str(exc)[:80]}")
+        sweeps += 1
+        if sweeps % 15 == 0:
+            print(f"  {sweeps} sweeps, {sum(len(p.fills) for p in pilots)} fills so far")
         time.sleep(max(0.0, args.poll - (time.time() - t0)))
     client.close()
-    report(p)
+    report(pilots)
     return 0
 
 

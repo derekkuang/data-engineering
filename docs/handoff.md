@@ -39,12 +39,15 @@ project; durable value = the platform + the honest "efficient to the limits of a
   selection, news-toxicity, months of directional inventory. NET is the open question.**
 
 ## Active / next actions
-1. **Politics-maker NET test (IN PROGRESS):** `lp_paper_pilot --category Politics,Elections,World,Economics`
-   paper-makes political favorites (zero-capital, simulated fills) to measure the **markout** (news-toxicity)
-   that the gross number ignores. Scheduled daily via `paper-pilot-politics.yml` → accumulates to
-   `docs/paper_pilot_findings_politics.md`. **Next chat: read that file's trend.** If markout is strongly
-   negative → toxicity eats the edge (as it did soccer). Better version: multi-market (quote many favorites
-   at once) to accumulate faster; politics is slow per-market.
+1. **Politics-maker NET test (IN PROGRESS):** `lp_paper_pilot --category Politics,Elections,World,Economics
+   --markets 10` paper-makes the 10 most-active political favorites AT ONCE (zero-capital, simulated fills)
+   to measure the **markout** (news-toxicity) that the gross number ignores. **Multi-market mode now built**
+   (08-07): pools fills across markets → ~10× faster markout accumulation (a live 30s probe pooled 283 fills
+   vs 96/12min single-market); each fill still marked vs its own market's mid; unit-tested
+   (`tests/test_lp_paper_pilot.py`). Scheduled daily via `paper-pilot-politics.yml` (`--markets 10 --poll 6`,
+   20:00 UTC) → accumulates to `docs/paper_pilot_findings_politics.md`. **Next chat: read that file's trend**
+   (needs a few days of the multi-market runs). If markout is strongly negative → toxicity eats the edge (as
+   it did soccer); if benign → the gross maker edge may survive.
 2. **THE LIVE MEX (Liga MX) SPREAD pilot** — the real-money experiment that confirms the soccer edge transfer.
    BLOCKED on a live Liga MX game + Derek present (NOT autonomous — real money). `lp_live --live
    --i-understand-live --pilot KXLIGAMX --prefix KXLIGAMX --minutes 60` + paired `ws_features --prefix
