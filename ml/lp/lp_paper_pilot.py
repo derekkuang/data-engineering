@@ -100,10 +100,13 @@ def best_bid_ask(book: dict[str, Any]) -> tuple[float, float] | None:
     return max(yb), round(1.0 - max(nb), 4)
 
 
-def pick_benign_ticker(client: KalshiClient, prefixes: tuple[str, ...] | None = None) -> str | None:
+def pick_benign_ticker(client: KalshiClient, prefixes: tuple[str, ...] | None = None,
+                       series_set: set[str] | None = None) -> str | None:
     """Most actively-trading benign market right now, from the live trade feed. ``prefixes``
-    restricts the universe (e.g. club-soccer prefixes for a targeted soccer test); default =
-    the broad benign board."""
+    restricts the universe (e.g. club-soccer prefixes); ``series_set`` (a set of series tickers,
+    e.g. all political series from list_series-by-category) OVERRIDES the prefix match — politics
+    has thousands of heterogeneous series, so match by series membership, not a prefix list.
+    Default = the broad benign board."""
     pfx = prefixes or ELIGIBLE_PREFIXES
     trades = client.get("/markets/trades", params={"limit": 1000}).get("trades", [])
     counts: Counter[str] = Counter()
@@ -111,7 +114,9 @@ def pick_benign_ticker(client: KalshiClient, prefixes: tuple[str, ...] | None = 
         tk = t.get("ticker", "")
         if any(x in tk for x in EXCLUDE):
             continue
-        if any(tk.startswith(p) for p in pfx):
+        matched = (tk.split("-")[0] in series_set) if series_set is not None \
+            else any(tk.startswith(p) for p in pfx)
+        if matched:
             counts[tk] += 1
     for tk, _ in counts.most_common(25):
         book = client.get_market_orderbook(tk)
@@ -209,13 +214,19 @@ def main() -> int:
     ap.add_argument("--ticker", default=None)
     ap.add_argument("--prefix", default=None,
                     help="restrict the auto-pick to these comma-separated prefixes (e.g. soccer)")
+    ap.add_argument("--category", default=None,
+                    help="pick the most-active market in these Kalshi categories (e.g. Politics)")
     ap.add_argument("--minutes", type=float, default=20.0)
     ap.add_argument("--poll", type=float, default=POLL_SECONDS)
     args = ap.parse_args()
 
     client = KalshiClient(pace_seconds=0.1)
     prefixes = tuple(p.strip() for p in args.prefix.split(",")) if args.prefix else None
-    ticker = args.ticker or pick_benign_ticker(client, prefixes)
+    series_set: set[str] | None = None
+    if args.category:
+        cats = {c.strip() for c in args.category.split(",")}
+        series_set = {s["ticker"] for s in client.list_series() if s.get("category") in cats}
+    ticker = args.ticker or pick_benign_ticker(client, prefixes, series_set)
     if not ticker:
         print("No actively-trading benign market found right now. Pass --ticker.")
         return 1

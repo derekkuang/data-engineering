@@ -1,0 +1,62 @@
+name: paper-pilot politics (zero-capital maker-toxicity test)
+
+# Autonomous ZERO-MONEY test of the POLITICS-maker lead (ml/research/politics_calibration.py found
+# the compression is a GROSS-positive maker edge — favorites underpriced — but gross of news-toxicity
+# + fill-rate + months of inventory). This paper-makes the most-active political favorite against the
+# LIVE book (simulated fills, no capital, no key — public data), measuring realized capture + markout.
+# The MARKOUT is the key net-question input: how toxic is political-favorite flow (does the price move
+# against a resting maker)? Result appended to docs/paper_pilot_findings_politics.md, committed [skip ci].
+#
+# Politics trades SLOWLY (few fills/session) so this accumulates over many days — the honest way to a
+# net read. ONE modest run/day to limit Actions minutes; disable (delete the schedule) when done, or
+# widen if minutes allow. A multi-market version (quote many favorites at once) would accumulate faster.
+
+on:
+  schedule:
+    - cron: "0 20 * * *"   # 20:00 UTC — US afternoon, political markets most active
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "paper-pilot minutes"
+        default: "25"
+
+concurrency:
+  group: paper-pilot-politics
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  paper-pilot-politics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      KALSHI_API_BASE: https://external-api.kalshi.com/trade-api/v2   # public — no key needed
+      MINUTES: ${{ inputs.minutes || '25' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install dependencies (locked)
+        run: uv sync --frozen
+      - name: Paper-make a political favorite (zero capital)
+        run: |
+          {
+            echo ""
+            echo "## $(date -u +'%Y-%m-%d %H:%M UTC') — paper pilot (politics)"
+            echo '```'
+          } >> docs/paper_pilot_findings_politics.md
+          uv run python -m ml.lp.lp_paper_pilot --category "Politics,Elections,World,Economics" \
+            --minutes "$MINUTES" 2>&1 | tee -a docs/paper_pilot_findings_politics.md || true
+          echo '```' >> docs/paper_pilot_findings_politics.md
+      - name: Commit findings
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/paper_pilot_findings_politics.md
+          git diff --cached --quiet || git commit -m "politics paper-pilot $(date -u +%F-%H%M) [skip ci]"
+          git push
