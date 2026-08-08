@@ -72,3 +72,42 @@ the seed's 96 fills / 12 min single-market.
 ```
 No actively-trading benign market found right now. Pass --ticker.
 ```
+
+## 2026-08-08 20:36 UTC — paper pilot (politics)
+```
+Paper-quoting KXBRSENMOSTSEATS-26OCT04-PL for 25 min (poll 6s) ...
+  15 sweeps, 51 fills so far
+  30 sweeps, 51 fills so far
+  45 sweeps, 51 fills so far
+  60 sweeps, 52 fills so far
+  75 sweeps, 52 fills so far
+  90 sweeps, 52 fills so far
+  105 sweeps, 52 fills so far
+  120 sweeps, 52 fills so far
+  135 sweeps, 52 fills so far
+  150 sweeps, 52 fills so far
+  165 sweeps, 52 fills so far
+  180 sweeps, 52 fills so far
+  195 sweeps, 52 fills so far
+  210 sweeps, 52 fills so far
+  225 sweeps, 52 fills so far
+  240 sweeps, 52 fills so far
+
+======================================================================
+PAPER LP PILOT — KXBRSENMOSTSEATS-26OCT04-PL
+======================================================================
+ran 24.9 min, 250 polls, avg spread 3.0c
+(upper-bound) fills: 52   buys: 52   sells: 0   net inventory: 52
+
+gross edge captured (Σ side·(mid−fill)) : +208.0c over 52 fills = +4.00c/fill
+ horizon  fills w/ mark   mean markout   mean net pnl
+-----------------------------------------------------
+    15s             52         -5.47c         -1.47c
+    30s             52         -5.47c         -1.47c
+    60s             52         -1.55c         +2.45c
+
+Read: markout<0 = adverse selection (toxic); net pnl = edge + markout per
+fill. POSITIVE net across horizons => a maker plausibly profits here -> a real
+Phase-B candidate. Reminder: fill rate is an UPPER BOUND (queue ignored); only
+live resting orders (Phase B) give the true rate. Markout is queue-independent.
+```
