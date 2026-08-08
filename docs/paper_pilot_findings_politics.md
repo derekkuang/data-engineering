@@ -36,6 +36,38 @@ Phase-B candidate. Reminder: fill rate is an UPPER BOUND (queue ignored); only
 live resting orders (Phase B) give the true rate. Markout is queue-independent.
 ```
 
+## 2026-08-07 12:22 UTC — paper pilot (politics) [first MULTI-MARKET run, manual]
+```
+PAPER LP PILOT — 5 markets
+======================================================================
+ran 8.0 min, 170 polls, avg spread 3.8c
+(upper-bound) fills: 369   buys: 207   sells: 162   net inventory: 45
+
+gross edge captured (Σ side·(mid−fill)) : +676.0c over 369 fills = +1.83c/fill
+ horizon  fills w/ mark   mean markout   mean net pnl
+-----------------------------------------------------
+    15s            366         +0.03c         +1.72c
+    30s            366         +0.02c         +1.71c
+    60s            366         +0.02c         +1.71c
+
+                  per-market   fills  net inv  gross/fill
+      KXHIPRIMARY-01D26-ECAS      99      -89      +2.54c
+     KXPAYROLLS-26JUL-T90000      95       +5      +1.00c
+     KXAAAGASW-26AUG10-4.000      89      +71      +2.00c
+     KXECONSTATU3-26JUL-T4.2      65      +49      +1.50c
+     KXAAAGASD-26AUG08-4.030      21       +9      +2.57c
+```
+**Read:** markout ≈ 0 (+0.02–0.03c; SE ~±0.1c over 366 fills → **statistically indistinguishable
+from zero**; flat across all three horizons) = **no detectable adverse selection** in this window,
+and all 5 markets gross-positive. Corroborates the seed's benign markout. **CAVEAT — a calm no-news
+window** (8:22 AM ET): the toxicity question is about NEWS shocks (payroll prints / poll drops /
+debates / election nights — the analog of the soccer goals that drove soccer's −0.135c), which this
+run does not sample; and the picker landed mostly on econ/gas markets (KXPAYROLLS, KXAAAGAS,
+KXECONSTAT), which are toxic *precisely* at their scheduled data releases. **First hurdle cleared
+(no baseline toxicity in calm conditions), NOT the net verdict** — that needs the newsier windows
+the daily runs will accumulate. Multi-market accumulation confirmed working: 369 fills / 8 min vs
+the seed's 96 fills / 12 min single-market.
+
 ## 2026-08-07 20:48 UTC — paper pilot (politics)
 ```
 No actively-trading benign market found right now. Pass --ticker.
