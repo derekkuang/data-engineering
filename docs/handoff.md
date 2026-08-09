@@ -44,8 +44,9 @@ project; durable value = the platform + the honest "efficient to the limits of a
    to measure the **markout** (news-toxicity) that the gross number ignores. **Multi-market mode now built**
    (08-07): pools fills across markets → ~10× faster markout accumulation (a live 30s probe pooled 283 fills
    vs 96/12min single-market); each fill still marked vs its own market's mid; unit-tested
-   (`tests/test_lp_paper_pilot.py`). Scheduled daily via `paper-pilot-politics.yml` (`--markets 10 --poll 6`,
-   20:00 UTC) → accumulates to `docs/paper_pilot_findings_politics.md`. **Next chat: read that file's trend**
+   (`tests/test_lp_paper_pilot.py`). Scheduled via `paper-pilot-politics.yml` (`--markets 10 --poll 6`,
+   **two windows: 13:00 UTC midday-ET where pooling works + 20:00 UTC afternoon-ET, often thin 0-1 but
+   newsier**) → `docs/paper_pilot_findings_politics.md`. **Next chat: read that file's trend**
    (needs a few days of the multi-market runs). If markout is strongly negative → toxicity eats the edge (as
    it did soccer); if benign → the gross maker edge may survive.
 2. **THE LIVE MEX (Liga MX) SPREAD pilot** — the real-money experiment that confirms the soccer edge transfer.

@@ -9,12 +9,15 @@ name: paper-pilot politics (zero-capital maker-toxicity test)
 #
 # Politics trades SLOWLY per market, so we quote the 10 most-active favorites AT ONCE (--markets 10):
 # fills pool across markets and the markout accumulates ~10x faster — still the honest net read (markout
-# is queue-independent). ONE modest run/day to limit Actions minutes; disable (delete the schedule) when
-# done, or widen --markets/--minutes if minutes allow.
+# is queue-independent). TWO windows/day: 13:00 UTC (midday-ET) reliably finds several makeable markets
+# so the pooling actually kicks in (found 5 in testing); 20:00 UTC (afternoon-ET) is often thin (0-1
+# makeable → single-market reads) but may catch newsier/repricing sessions. Disable (delete a schedule)
+# when done, or widen --markets/--minutes if Actions minutes allow.
 
 on:
   schedule:
-    - cron: "0 20 * * *"   # 20:00 UTC — US afternoon, political markets most active
+    - cron: "0 13 * * *"   # 13:00 UTC — midday-ET; found 5 makeable markets in testing (pooling works)
+    - cron: "0 20 * * *"   # 20:00 UTC — afternoon-ET; often thin (0-1) but potentially newsier
   workflow_dispatch:
     inputs:
       minutes:

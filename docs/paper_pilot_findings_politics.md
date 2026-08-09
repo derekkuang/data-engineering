@@ -11,8 +11,9 @@ markout is queue-independent so pooling is honest (each fill is still marked vs 
 the price move against a resting maker after a fill)? If markout is strongly negative → news-toxicity eats the
 gross edge (as it did for soccer); if benign → the gross maker edge may survive. Fill *rate* is an optimistic
 upper bound (queue ignored). Politics trades slowly, so this **accumulates over many days** — read the trend,
-not a single thin session. Scheduled by `.github/workflows/paper-pilot-politics.yml` (1 run/day, 20:00 UTC).
-**Newest entries appended below.**
+not a single thin session. Scheduled by `.github/workflows/paper-pilot-politics.yml` — **two windows/day:
+13:00 UTC (midday-ET, reliably several makeable markets → pooling works) + 20:00 UTC (afternoon-ET, often
+thin 0-1 makeable but potentially newsier)**. **Newest entries appended below.**
 
 ---
 
