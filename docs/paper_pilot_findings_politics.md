@@ -117,3 +117,42 @@ live resting orders (Phase B) give the true rate. Markout is queue-independent.
 ```
 No actively-trading benign market found right now. Pass --ticker.
 ```
+
+## 2026-08-09 20:39 UTC — paper pilot (politics)
+```
+Paper-quoting KXHORMUZWEEKLY-26AUG09-T45 for 25 min (poll 6s) ...
+  15 sweeps, 96 fills so far
+  30 sweeps, 96 fills so far
+  45 sweeps, 96 fills so far
+  60 sweeps, 96 fills so far
+  75 sweeps, 96 fills so far
+  90 sweeps, 96 fills so far
+  105 sweeps, 96 fills so far
+  120 sweeps, 96 fills so far
+  135 sweeps, 96 fills so far
+  150 sweeps, 96 fills so far
+  165 sweeps, 96 fills so far
+  180 sweeps, 96 fills so far
+  195 sweeps, 96 fills so far
+  210 sweeps, 96 fills so far
+  225 sweeps, 96 fills so far
+  240 sweeps, 96 fills so far
+
+======================================================================
+PAPER LP PILOT — KXHORMUZWEEKLY-26AUG09-T45
+======================================================================
+ran 24.9 min, 250 polls, avg spread 3.0c
+(upper-bound) fills: 96   buys: 0   sells: 96   net inventory: -96
+
+gross edge captured (Σ side·(mid−fill)) : +144.0c over 96 fills = +1.50c/fill
+ horizon  fills w/ mark   mean markout   mean net pnl
+-----------------------------------------------------
+    15s             96         +0.00c         +1.50c
+    30s             96         +0.00c         +1.50c
+    60s             96         +0.00c         +1.50c
+
+Read: markout<0 = adverse selection (toxic); net pnl = edge + markout per
+fill. POSITIVE net across horizons => a maker plausibly profits here -> a real
+Phase-B candidate. Reminder: fill rate is an UPPER BOUND (queue ignored); only
+live resting orders (Phase B) give the true rate. Markout is queue-independent.
+```
