@@ -147,3 +147,8 @@ live resting orders (Phase B) give the true rate. Markout is queue-independent.
 ```
 No actively-trading benign market found right now. Pass --ticker.
 ```
+
+## 2026-08-10 04:21 UTC — paper pilot (soccer)
+```
+No actively-trading benign market found right now. Pass --ticker.
+```
