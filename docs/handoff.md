@@ -31,24 +31,27 @@ project; durable value = the platform + the honest "efficient to the limits of a
   toxicity). Whether it TRANSFERS from World Cup to year-round club soccer is the open question, resolvable
   ONLY by real fills. Pick-off risk rule (`ml/research/pickoff_dynamics.py`): jumps are warn-able via the
   TAPE (trade/flow/vol AUC ~0.8) but a PULL signal not a lean → monitor tape, pull on a surge.
-- **THE ONE OPEN NEW LEAD (08-07, first gross-positive of the whole hunt) = POLITICS MAKER.**
+- **THE ONE GROSS-POSITIVE LEAD (08-07, first of the whole hunt) = POLITICS MAKER — paper phase CLOSED 08-10.**
   `ml/research/politics_calibration.py` (3,968-resolved-market calibration + 3-regime backtest): politics
   prices are compressed toward 50% (favorites underpriced, slope ~1.25-1.33, ECE 0.026 vs crypto 0.007).
   UNtradeable as a taker (trapped in spread+fee), but **GROSS-positive as a maker** — MID +2-3.6%/ct,
-  MAKER@bid +3.4-7.3%/ct, event-block CIs entirely > 0. **Gross of the real killers: fill-rate/adverse-
-  selection, news-toxicity, months of directional inventory. NET is the open question.**
+  MAKER@bid +3.4-7.3%/ct, event-block CIs entirely > 0. **PAPER PHASE VERDICT (08-10, 7 sessions/~640 fills,
+  `docs/paper_pilot_findings_politics.md`):** short-horizon markout **leans NON-FATAL** (6 benign ~0 / 1 toxic
+  −5.5c) — the fast-news toxicity that killed soccer is largely absent. BUT paper can't finish it: politics is
+  too thin (picker finds 0-1 makeable markets/session → every read a single one-sided market, only 1 pooled
+  read ever), and the two bigger killers — real **fill-rate** + **months-long directional inventory** — need
+  real capital. **NET resolvable only by a small real-money maker pilot (Derek's call, deferred).** Autonomous
+  runs disabled; `paper-pilot-politics.yml` kept for manual `workflow_dispatch`.
 
 ## Active / next actions
-1. **Politics-maker NET test (IN PROGRESS):** `lp_paper_pilot --category Politics,Elections,World,Economics
-   --markets 10` paper-makes the 10 most-active political favorites AT ONCE (zero-capital, simulated fills)
-   to measure the **markout** (news-toxicity) that the gross number ignores. **Multi-market mode now built**
-   (08-07): pools fills across markets → ~10× faster markout accumulation (a live 30s probe pooled 283 fills
-   vs 96/12min single-market); each fill still marked vs its own market's mid; unit-tested
-   (`tests/test_lp_paper_pilot.py`). Scheduled via `paper-pilot-politics.yml` (`--markets 10 --poll 6`,
-   **two windows: 13:00 UTC midday-ET where pooling works + 20:00 UTC afternoon-ET, often thin 0-1 but
-   newsier**) → `docs/paper_pilot_findings_politics.md`. **Next chat: read that file's trend**
-   (needs a few days of the multi-market runs). If markout is strongly negative → toxicity eats the edge (as
-   it did soccer); if benign → the gross maker edge may survive.
+1. **Politics-maker NET test — paper phase DONE (08-10), verdict above.** `lp_paper_pilot --category
+   Politics,… --markets 10` multi-market mode built + unit-tested (`tests/test_lp_paper_pilot.py`); it
+   resolved the microstructure-toxicity killer (leans non-fatal) but hit two walls paper can't climb
+   (thinness → no pooled distribution; fill-rate + months-inventory → need real capital). Autonomous schedule
+   OFF. **The only remaining resolution is a small REAL-MONEY politics maker pilot** (rest a bid on a
+   compressed favorite, measure true fill-rate + live the inventory) — deferred, Derek's call; a slow
+   months-long directional-inventory game, distinct from the fast soccer-MM pilot below. Re-enable the paper
+   bot via `workflow_dispatch` / restore the cron if a discovery fix or an election window makes it worthwhile.
 2. **THE LIVE MEX (Liga MX) SPREAD pilot** — the real-money experiment that confirms the soccer edge transfer.
    BLOCKED on a live Liga MX game + Derek present (NOT autonomous — real money). `lp_live --live
    --i-understand-live --pilot KXLIGAMX --prefix KXLIGAMX --minutes 60` + paired `ws_features --prefix

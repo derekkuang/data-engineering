@@ -7,17 +7,19 @@ name: paper-pilot politics (zero-capital maker-toxicity test)
 # The MARKOUT is the key net-question input: how toxic is political-favorite flow (does the price move
 # against a resting maker)? Result appended to docs/paper_pilot_findings_politics.md, committed [skip ci].
 #
-# Politics trades SLOWLY per market, so we quote the 10 most-active favorites AT ONCE (--markets 10):
-# fills pool across markets and the markout accumulates ~10x faster — still the honest net read (markout
-# is queue-independent). TWO windows/day: 13:00 UTC (midday-ET) reliably finds several makeable markets
-# so the pooling actually kicks in (found 5 in testing); 20:00 UTC (afternoon-ET) is often thin (0-1
-# makeable → single-market reads) but may catch newsier/repricing sessions. Disable (delete a schedule)
-# when done, or widen --markets/--minutes if Actions minutes allow.
+# PAPER PHASE CLOSED 2026-08-10 — autonomous schedule DISABLED (see the VERDICT block atop
+# docs/paper_pilot_findings_politics.md). Short-horizon markout leaned NON-FATAL (6 benign / 1 toxic over
+# 7 sessions), but politics is too thin for the picker to find >0-1 makeable markets per session (--markets
+# 10 → 1), so every read was a single one-sided market — never the pooled distribution this was built for.
+# And paper can't measure the two bigger killers (real fill-rate + months-long directional inventory), which
+# need real capital. Kept for MANUAL re-runs (workflow_dispatch); restore the `schedule:` block below to
+# resume the daily accumulation (e.g. if a discovery fix lands or an election window makes politics liquid).
+#
+#   schedule:
+#     - cron: "0 13 * * *"   # 13:00 UTC — midday-ET
+#     - cron: "0 20 * * *"   # 20:00 UTC — afternoon-ET
 
 on:
-  schedule:
-    - cron: "0 13 * * *"   # 13:00 UTC — midday-ET; found 5 makeable markets in testing (pooling works)
-    - cron: "0 20 * * *"   # 20:00 UTC — afternoon-ET; often thin (0-1) but potentially newsier
   workflow_dispatch:
     inputs:
       minutes:

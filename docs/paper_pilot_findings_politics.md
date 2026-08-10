@@ -12,8 +12,41 @@ the price move against a resting maker after a fill)? If markout is strongly neg
 gross edge (as it did for soccer); if benign → the gross maker edge may survive. Fill *rate* is an optimistic
 upper bound (queue ignored). Politics trades slowly, so this **accumulates over many days** — read the trend,
 not a single thin session. Scheduled by `.github/workflows/paper-pilot-politics.yml` — **two windows/day:
-13:00 UTC (midday-ET, reliably several makeable markets → pooling works) + 20:00 UTC (afternoon-ET, often
-thin 0-1 makeable but potentially newsier)**. **Newest entries appended below.**
+13:00 UTC (midday-ET) + 20:00 UTC (afternoon-ET)**. **Newest entries appended below.**
+
+---
+
+## VERDICT — 2026-08-10 (paper phase CLOSED; autonomous runs disabled)
+
+**What the paper phase resolved:** short-horizon markout (the first of three net-killers — is a resting
+political-favorite maker picked off by news in the 15–60s after a fill?) **leans NON-FATAL.** Across
+**7 sessions / ~640 upper-bound fills**, 6 were benign (markout ~0 — the mid does *not* move against us
+after a fill) and **1 was toxic** (08-08 Brazil Senate, −5.5c/15s, in an actively-repricing all-buys
+session). So microstructure adverse selection is *not* systematically eating the maker in normal
+conditions, though it can spike in a repricing market. That's the encouraging half.
+
+**Why paper cannot deliver a NET verdict (why we stop here):**
+1. **Politics is too thin to run the designed experiment.** The picker finds only **0–1 makeable markets
+   per session** (measured: `--markets 10` → 1 at multiple times/days), so every read is a *single market's
+   one-sided directional episode* (Brazil 52 all-buys, Hormuz 96 all-sells, U3 31 all-buys) — never the
+   pooled distribution `--markets 10` was built for (that happened *once*, manually, and was benign). So
+   "6 benign / 1 toxic" is **6 anecdotes, not a distribution** — can't rule out the −5.5c being a recurring
+   tail. Fixing discovery (volume-ranked scan) could firm this up but wouldn't touch the two killers below.
+2. **The two bigger killers are unmeasurable on paper.** (a) **Fill-rate** — paper optimistically assumes
+   we fill at the touch (queue position unknowable without real orders). (b) **Months-long directional
+   inventory** — the compression edge *is* a hold-to-resolution bet; the maker accumulates large one-sided
+   positions (e.g. −96 Hormuz) held for **weeks-to-months** with capital locked. A benign 60s markout says
+   nothing about that multi-week exposure. Both require **real capital** to measure.
+
+**Bottom line:** politics-maker remains the **one gross-positive lead** of the whole hunt, and its
+microstructure toxicity looks *survivable* — but it is a **thin, slow, capital-heavy, months-long
+directional-inventory game** whose NET viability is blocked by thinness + fill-rate + inventory risk, not
+by the fast-news toxicity that killed soccer. This fits the project's "efficient to the limits of
+arbitrage" thesis: the mispricing is real (established), the microstructure toxicity is not obviously
+fatal (this phase), but harvesting it net is gated by friction + capital, resolvable **only with a small
+real-money maker pilot** (Derek's call, deferred) — a fundamentally different animal than the fast
+sports-MM survivor. Autonomous daily runs disabled 2026-08-10 (re-enable via `paper-pilot-politics.yml`
+`workflow_dispatch` or restore the cron). **Session logs below (chronological).**
 
 ---
 
