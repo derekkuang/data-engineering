@@ -1,4 +1,4 @@
-"""Unit tests for the zero-capital paper-maker (ml/lp/lp_paper_pilot.py).
+"""Unit tests for the zero-capital paper-maker (core/maker/lp_paper_pilot.py).
 
 Covers the pieces the multi-market politics upgrade touches — none need the network:
   * pick_benign_tickers: top-N makeable selection (spread filter + EXCLUDE + series_set override),
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from ml.lp.lp_paper_pilot import (
+from core.maker.lp_paper_pilot import (
     Fill,
     Pilot,
     best_bid_ask,

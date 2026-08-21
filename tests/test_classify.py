@@ -1,4 +1,4 @@
-"""Parity + contract tests for the canonical classifier (`ml.lp.classify`).
+"""Parity + contract tests for the canonical classifier (`core.maker.classify`).
 
 Two guarantees:
   1. The committed dbt macro is BYTE-IDENTICAL to what `emit_sql()` generates — so the SQL
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ml.lp.classify import (
+from core.maker.classify import (
     BROAD_TYPES,
     SINGLE_NAME_TYPES,
     SOCCER_SPORTS,
@@ -53,7 +53,7 @@ FIXTURE: list[tuple[str, str, str]] = [
 def test_macro_file_matches_emit_sql() -> None:
     assert MACRO_FILE.read_text() == emit_sql(), (
         "dbt/macros/classify.sql is stale — regenerate with "
-        "`uv run python -m ml.lp.classify --emit-sql > dbt/macros/classify.sql`"
+        "`uv run python -m core.maker.classify --emit-sql > dbt/macros/classify.sql`"
     )
 
 

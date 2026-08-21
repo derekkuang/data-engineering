@@ -5,7 +5,7 @@ Layout::
     s3://<bucket>/raw/lp_sessions/dt=YYYY-MM-DD/sessions.parquet
     s3://<bucket>/raw/lp_fills/dt=YYYY-MM-DD/fills.parquet
 
-The bot (``ml/lp_live.py``) appends one row per market-session to ``data/lp_sessions.csv``
+The bot (``core/maker/lp_live.py``) appends one row per market-session to ``data/lp_sessions.csv``
 and one row per fill (with its markout) to ``data/lp_fills.csv``. This module lifts those
 local CSVs into the same raw zone the rest of the platform uses, partitioned by the UTC
 date of the session timestamp. ``dt`` lives in the S3 key (Hive-style), *not* in the Parquet

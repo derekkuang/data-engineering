@@ -20,7 +20,7 @@ select
     cast(with_timezone(session_at, 'UTC') at time zone 'America/New_York' as date) as et_day,
     market_ticker,
 
-    -- Sport + market structure from the CANONICAL shared classifier (ml/lp/classify.py ->
+    -- Sport + market structure from the CANONICAL shared classifier (core/maker/classify.py ->
     -- dbt/macros/classify.sql). Using the macro is what fixed the review's silent join bug:
     -- club-soccer fills used to fall to sport='OTHER' here (the CASE lacked MLS/LigaMX/...),
     -- so they never matched their capture-side verdict. Both marts now classify identically.

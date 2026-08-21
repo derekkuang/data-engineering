@@ -1,6 +1,6 @@
 name: paper-pilot (zero-capital soccer test)
 
-# Autonomous ZERO-MONEY test of the club-soccer maker edge. Runs ml.lp.lp_paper_pilot at weekend
+# Autonomous ZERO-MONEY test of the club-soccer maker edge. Runs core.maker.lp_paper_pilot at weekend
 # club-soccer windows: it quotes a maker at the touch against the LIVE Kalshi book and SIMULATES
 # fills (no capital at risk, no trading key — all PUBLIC market data), measuring realized capture +
 # markout at seconds resolution on the most active live club-soccer game. The result is appended to
@@ -58,7 +58,7 @@ jobs:
             echo '```'
           } >> docs/paper_pilot_findings.md
           # `|| true`: a window with no live/makeable soccer exits non-zero — still record it.
-          uv run python -m ml.lp.lp_paper_pilot --prefix "$SOCCER" --minutes "$MINUTES" \
+          uv run python -m core.maker.lp_paper_pilot --prefix "$SOCCER" --minutes "$MINUTES" \
             2>&1 | tee -a docs/paper_pilot_findings.md || true
           echo '```' >> docs/paper_pilot_findings.md
 

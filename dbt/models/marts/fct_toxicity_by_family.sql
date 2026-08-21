@@ -10,7 +10,7 @@
 -- Known-toxic families (ITF, MLB/NBA GAME) are captured deliberately as positive controls:
 -- if they don't read toxic here, the instrument is broken, not the market benign.
 --
--- The day grain exists because days are the honest resampling unit — ml/lp/edge_verdict.py
+-- The day grain exists because days are the honest resampling unit — core/maker/edge_verdict.py
 -- draws day-block bootstrap CIs from this table.
 --
 -- Still a full-rebuild TABLE. It aggregates fct_ws_markout per (family, ET day), so it can't use
@@ -40,7 +40,7 @@ labeled as (
             as capture_day,
         market_ticker,
 
-        -- Canonical shared classifier (ml/lp/classify.py -> dbt/macros/classify.sql); the
+        -- Canonical shared classifier (core/maker/classify.py -> dbt/macros/classify.sql); the
         -- LP-fills mart uses the SAME macro, so the two sides' families join by construction.
         {{ classify_sport('market_ticker') }} as sport,
         {{ classify_market_type('market_ticker') }} as market_type,

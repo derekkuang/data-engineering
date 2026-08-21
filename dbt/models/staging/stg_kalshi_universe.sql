@@ -2,7 +2,7 @@
 -- View (see dbt_project.yml). Rename/derive, dedupe, drop unusable rows.
 --
 -- Each row is one open market's point-in-time quote. Derives mid/spread + the near-money
--- and retail-spread-band flags the LP screen uses (ml/lp/soccer_screen.py: near-money mid
+-- and retail-spread-band flags the LP screen uses (strategies/soccer_mm/soccer_screen.py: near-money mid
 -- in [0.15, 0.85]; retail band = 2-15c spread). Drops one-sided / no-flow markets so every
 -- downstream row is something a maker could actually rest inside.
 

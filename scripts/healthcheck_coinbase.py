@@ -8,7 +8,7 @@ Usage:
     uv run python scripts/healthcheck_coinbase.py
 """
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -20,7 +20,7 @@ REQUEST_TIMEOUT_SECONDS = 10.0
 
 
 def fetch_recent_candles(product: str, granularity: int) -> list[list[float]]:
-    end = datetime.now(timezone.utc)
+    end = datetime.now(UTC)
     start = end - timedelta(hours=1)
 
     response = httpx.get(
@@ -59,9 +59,9 @@ def main() -> int:
         return 1
 
     # Coinbase returns candles newest-first, so index 0 is the most recent.
-    latest_ts = datetime.fromtimestamp(candles[0][0], tz=timezone.utc)
+    latest_ts = datetime.fromtimestamp(candles[0][0], tz=UTC)
     latest_close = candles[0][4]
-    age = datetime.now(timezone.utc) - latest_ts
+    age = datetime.now(UTC) - latest_ts
 
     print(f"OK: received {len(candles)} candles")
     print(f"    latest candle ts: {latest_ts.isoformat()} (age {age})")

@@ -3,7 +3,7 @@ version: 2
 sources:
   - name: lp
     description: >
-      Raw logs from the live LP market-making bot (ml/lp_live.py), landed in the S3
+      Raw logs from the live LP market-making bot (core/maker/lp_live.py), landed in the S3
       raw zone by ingestion/lp_storage.py and exposed via Glue external tables with
       partition projection on dt. One file per dt, overwritten on re-run (idempotent).
       See docs/setup/07-lp-pipeline.md for the CREATE EXTERNAL TABLE DDL.

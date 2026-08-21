@@ -1,6 +1,6 @@
 name: paper-pilot politics (zero-capital maker-toxicity test)
 
-# Autonomous ZERO-MONEY test of the POLITICS-maker lead (ml/research/politics_calibration.py found
+# Autonomous ZERO-MONEY test of the POLITICS-maker lead (strategies/politics_mm/politics_calibration.py found
 # the compression is a GROSS-positive maker edge — favorites underpriced — but gross of news-toxicity
 # + fill-rate + months of inventory). This paper-makes the most-active political favorite against the
 # LIVE book (simulated fills, no capital, no key — public data), measuring realized capture + markout.
@@ -56,7 +56,7 @@ jobs:
             echo "## $(date -u +'%Y-%m-%d %H:%M UTC') — paper pilot (politics)"
             echo '```'
           } >> docs/paper_pilot_findings_politics.md
-          uv run python -m ml.lp.lp_paper_pilot --category "Politics,Elections,World,Economics" \
+          uv run python -m core.maker.lp_paper_pilot --category "Politics,Elections,World,Economics" \
             --markets 10 --poll 6 --minutes "$MINUTES" 2>&1 | tee -a docs/paper_pilot_findings_politics.md || true
           echo '```' >> docs/paper_pilot_findings_politics.md
       - name: Commit findings

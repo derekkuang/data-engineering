@@ -5,7 +5,7 @@ A daily point-in-time snapshot of every OPEN market with a two-sided quote and r
 (``fct_kalshi_opportunity``) ranks. Public data, no auth. One Parquet per ``dt``
 (the UTC snapshot date), overwritten on re-run — daily last-snapshot-wins, idempotent.
 
-The universe is enumerated the way ``ml/lp/lp_market_screen.py`` does it — paginate
+The universe is enumerated the way ``core/maker/lp_market_screen.py`` does it — paginate
 ``/events?with_nested_markets=true`` (events carry series_ticker + category and exclude
 the auto-generated MVE parlay spam) — plus a cached ``/series`` fan-out for each distinct
 series' ``fee_type`` (the maker-fee flag). It never fans out per-market order books
@@ -80,7 +80,7 @@ def _iso_or_none(s: str | None) -> datetime | None:
 def fetch_open_events(client: KalshiClient) -> list[dict[str, Any]]:
     """Paginate open events WITH nested markets — the clean entry to the real universe
     (carries series_ticker + category, excludes the MVE parlay spam). Verbatim pattern
-    from ml/lp/lp_market_screen.py."""
+    from core/maker/lp_market_screen.py."""
     out: list[dict[str, Any]] = []
     cursor: str | None = None
     for _ in range(MAX_PAGES):

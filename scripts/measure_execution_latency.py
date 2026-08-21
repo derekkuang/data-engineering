@@ -36,9 +36,9 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from core.backtest.model import logistic_pipeline  # noqa: E402
 from ingestion.kalshi import SERIES_BTC_15M, KalshiClient  # noqa: E402
 from ingestion.kalshi_orderbook import active_market  # noqa: E402
-from ml.alpha.model import logistic_pipeline  # noqa: E402
 
 COINBASE_TICKER = "https://api.exchange.coinbase.com/products/BTC-USD/ticker"
 N_SAMPLES = 25

@@ -9,7 +9,13 @@ arithmetic so a silent regression can't quietly invalidate every reported ROI.
 import numpy as np
 import pytest
 
-from ml.alpha.backtest import _breakeven_cost, _effective_quote, _fee, _per_window_pnl, _summarise
+from core.backtest.backtest import (
+    _breakeven_cost,
+    _effective_quote,
+    _fee,
+    _per_window_pnl,
+    _summarise,
+)
 
 
 def arr(*vals: float) -> np.ndarray:

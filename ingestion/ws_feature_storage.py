@@ -4,7 +4,7 @@ Layout::
 
     s3://<bucket>/raw/ws_features/dt=YYYY-MM-DD/features-HHMMSS.parquet
 
-``ml/lp/ws_features.py`` captures, per market per snapshot, the pre-quote microstructure
+``core/capture/ws_features.py`` captures, per market per snapshot, the pre-quote microstructure
 features (book shape + imbalance, trade flow, mid vol/drift) to ``data/ws_features.csv``.
 This lifts that CSV into the same raw zone the rest of the platform uses, partitioned by the
 UTC date of the snapshot. ``dt`` lives in the S3 key (Hive-style), not the Parquet columns —

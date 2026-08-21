@@ -1,7 +1,7 @@
 name: ws in-play capture
 
 # Auto-logger for the toxicity / ML feature store. At game-heavy windows this captures the
-# live in-play microstructure of the active sports board (ml.lp.ws_features — book shape, flow,
+# live in-play microstructure of the active sports board (core.capture.ws_features — book shape, flow,
 # mid vol/drift, per market every few seconds) and lands it to the S3 raw zone
 # (ingestion.ws_feature_storage). The nightly `scheduled pipeline` then builds stg_ws_features
 # + fct_ws_markout (the markout-labeled table) over it.
@@ -79,9 +79,9 @@ jobs:
             "0 0 * * *"|"0 2 * * *") PREFIX="$SOCCER" ;;
           esac
           if [ -n "$PREFIX" ]; then
-            uv run python -m ml.lp.ws_features --minutes "$CAPTURE_MINUTES" --wide --prefix "$PREFIX"
+            uv run python -m core.capture.ws_features --minutes "$CAPTURE_MINUTES" --wide --prefix "$PREFIX"
           else
-            uv run python -m ml.lp.ws_features --minutes "$CAPTURE_MINUTES" --wide
+            uv run python -m core.capture.ws_features --minutes "$CAPTURE_MINUTES" --wide
           fi
 
       # The capture step outlives the 1-hour OIDC session (90+ min), so the job-start

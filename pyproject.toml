@@ -32,7 +32,7 @@ dashboard = [
 
 [tool.pytest.ini_options]
 # Only the pure-Python unit tests; airflow/tests need the Astro runtime image.
-# pythonpath puts the repo root on sys.path so `ml`/`ingestion` import the same
+# pythonpath puts the repo root on sys.path so `core`/`strategies`/`ingestion` import the same
 # way they do under `uv run python -m ...`.
 testpaths = ["tests"]
 pythonpath = ["."]

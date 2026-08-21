@@ -5,7 +5,7 @@ S3 → Glue → Athena → dbt stack as the rest of the platform. This is the da
 layer of the trading bot: ingestion → raw zone → staging → marts → (dashboard / model).
 
 ```
-ml/lp_live.py ──► data/lp_*.csv ──► ingestion/lp_storage.py ──► s3://…/raw/lp_*/dt=…/*.parquet
+core/maker/lp_live.py ──► data/lp_*.csv ──► ingestion/lp_storage.py ──► s3://…/raw/lp_*/dt=…/*.parquet
                                                                       │
                                               Glue external tables (partition projection on dt)
                                                                       │

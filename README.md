@@ -70,7 +70,7 @@ So the project became the machine that decides the question properly:
 
 - **The opportunity radar** (`fct_kalshi_opportunity` + the dashboard): every series daily, ranked by gross capturable spread, flagged for maker fees — *where could an edge live?* (Kalshi's own Pro terminal ships a real-time screener; this platform's edge is the **historical/analytical** view it can't provide.)
 - **The toxicity capture** (`fct_ws_markout` → `fct_toxicity_by_family`): in-play flow measured every 5s, each snapshot labeled with what the price did 30s later. Net-taker-flow-predicts-price = a maker gets picked off. Known-toxic families (ITF tennis, MLB games) are captured **deliberately as instrument controls** — if they don't read toxic, the tool is broken, not the market benign.
-- **The verdict** (`ml/lp/edge_verdict.py`): per family, day-block bootstrap CIs, split-half stability, multiple-comparison caveats → `FLOW-TOXIC / FLOW-BENIGN / INCONCLUSIVE / INSUFFICIENT`. Benign flow gates real capital; realized capture on our own fills — same discipline — delivers the final answer.
+- **The verdict** (`core/maker/edge_verdict.py`): per family, day-block bootstrap CIs, split-half stability, multiple-comparison caveats → `FLOW-TOXIC / FLOW-BENIGN / INCONCLUSIVE / INSUFFICIENT`. Benign flow gates real capital; realized capture on our own fills — same discipline — delivers the final answer.
 
 **Current status: the machine is collecting.** Either outcome completes the project honestly — a confirmed edge gets scaled onto the multi-market WebSocket infrastructure already built for it; a null gets written up like the seventeen before it.
 
@@ -92,9 +92,9 @@ So the project became the machine that decides the question properly:
                      ├── fct_toxicity_by_family    — the per-family/day toxicity scoreboard
                      └── fct_lp_market_session/daily — the bot's real-money P&L, decomposed
                               ↓                                   ↓
-              Streamlit Opportunity Radar             ml/lp/edge_verdict.py  (day-block CIs)
+              Streamlit Opportunity Radar             core/maker/edge_verdict.py  (day-block CIs)
                               ↓                                   ↓
-                    ml/lp/lp_live.py — the live maker (REST + WebSocket book/fills, kill switches)
+                    core/maker/lp_live.py — the live maker (REST + WebSocket book/fills, kill switches)
 
  Orchestration: GitHub Actions (CI on push · daily pipeline cron · game-window capture cron; OIDC, no stored keys)
                 + Airflow DAG (local showcase) + Lambda/EventBridge (serverless collection)
@@ -158,9 +158,8 @@ Lakehouse: S3 Parquet is the single source of truth, queried in place, pay-per-s
 | `dbt/` | 16 models in 3 layers, schema + PIT tests |
 | `dashboard/` | The Streamlit Opportunity Radar (`app.py`) + Athena snapshot publisher |
 | `airflow/` | Astro project, `crypto_price_ingest` DAG |
-| `ml/lp/` | **The active track**: live maker, screens, WS feeds/capture, `edge_verdict.py` |
-| `ml/alpha/` | The closed BTC hunt (benchmark → backtest → live verdicts) |
-| `ml/research/`, `ml/weather/` | Closed side-tracks, kept for the record (tennis, Polymarket, weather, cross-venue) |
+| `core/` | Reusable engines: `maker/` (live bot, gates, verdicts), `capture/` (WS tape/book), `backtest/` (walk-forward harness) |
+| `strategies/` | **The edge map** — one folder per strategy with its `VERDICT.md`: `soccer_mm/` (ACTIVE), `politics_mm/` (gated), `btc_direction/`, `weather_taker/`, `tennis/`, `polymarket/`, `cross_venue/`, `parlays/` (closed) |
 | `tests/` | 54 unit tests: money math, walk-forward leakage, storage contracts, feed parsing |
 | `scripts/` | Healthchecks, latency measurement, Lambda deploy |
 | `docs/devlog.md` | The full record — 24 entries, every experiment and dead end |

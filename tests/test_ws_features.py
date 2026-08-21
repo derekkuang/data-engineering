@@ -1,12 +1,12 @@
-"""Offline unit tests for the WS microstructure feature engineering (ml.lp.ws_features).
+"""Offline unit tests for the WS microstructure feature engineering (core.capture.ws_features).
 No network: construct LocalBooks / feed trades+mids directly and check the math + windowing."""
 
 from __future__ import annotations
 
 from decimal import Decimal
 
+from core.capture.ws_features import MarketFeatureState, book_features
 from ingestion.kalshi_ws import LocalBook
-from ml.lp.ws_features import MarketFeatureState, book_features
 
 
 def _book(yes: dict[str, str], no: dict[str, str]) -> LocalBook:
@@ -75,8 +75,8 @@ def test_discover_markets_wide_vs_gated() -> None:
     maker's trading gate excludes — but both modes keep the activity floor and prop excludes."""
     from typing import Any, cast
 
+    from core.capture.ws_logger import discover_markets
     from ingestion.kalshi import KalshiClient
-    from ml.lp.ws_logger import discover_markets
 
     class FakeClient:
         def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:

@@ -1,7 +1,7 @@
-"""Offline unit tests for the WS book-feed bridge (ml.lp.ws_book_feed).
+"""Offline unit tests for the WS book-feed bridge (core.capture.ws_book_feed).
 
 The whole point of the bridge is that ``feed.top()`` is a BYTE-FOR-BYTE drop-in for
-``ml.lp.lp_pilot.best_bid_ask`` — same dollar units, same ``ask = 1 - best_no`` convention,
+``core.maker.lp_pilot.best_bid_ask`` — same dollar units, same ``ask = 1 - best_no`` convention,
 and the same one-sided/absent-book -> ``None`` contract. If that equivalence holds, swapping
 the maker's per-poll book read for the WS feed cannot change the strategy. These tests pin
 it. No network, no thread: we inject a LocalBook and read it synchronously."""
@@ -13,11 +13,11 @@ import json
 from decimal import Decimal
 from typing import Any, cast
 
+from core.capture.ws_book_feed import WsBookFeed
+from core.maker.lp_live import _fill_count, _fill_price, _fill_ts
+from core.maker.lp_pilot import best_bid_ask
 from ingestion.kalshi import KalshiClient
 from ingestion.kalshi_ws import KalshiWS, LocalBook
-from ml.lp.lp_live import _fill_count, _fill_price, _fill_ts
-from ml.lp.lp_pilot import best_bid_ask
-from ml.lp.ws_book_feed import WsBookFeed
 
 
 def _ws() -> KalshiWS:

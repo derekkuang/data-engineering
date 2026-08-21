@@ -3,7 +3,7 @@
 --
 -- capture = sum(volume_24h * spread / 2) = the GROSS half-spread dollars/day a maker could
 -- earn if they won every fill (an UPPER BOUND + a sound RELATIVE ranking; see
--- ml/lp/lp_market_screen.py). It is NOT realized P&L (that lives in fct_lp_daily) and says
+-- core/maker/lp_market_screen.py). It is NOT realized P&L (that lives in fct_lp_daily) and says
 -- nothing about toxicity — a wide spread can be wide because flow is informed. has_maker_fee
 -- flags series where a Feb-2026 maker fee (0.0175*C*P*(1-P)) eats into that half-spread.
 --

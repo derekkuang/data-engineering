@@ -5,7 +5,7 @@ games, land it in the warehouse, and label it with forward markout — the data 
 "is this market's flow toxic?" (the edge test) and (b) train the toxicity/selection model.
 
 ```
-ml/lp/ws_features.py ──► data/ws_features.csv ──► ingestion/ws_feature_storage.py ──► s3://…/raw/ws_features/dt=…/features.parquet
+core/capture/ws_features.py ──► data/ws_features.csv ──► ingestion/ws_feature_storage.py ──► s3://…/raw/ws_features/dt=…/features.parquet
    (scheduled by .github/workflows/ws-capture.yml)                                          │
                                                         Glue external table (partition projection on dt)
                                                                                             │
@@ -34,7 +34,7 @@ To run a specific game by hand, use
 the workflow's `workflow_dispatch` (set `minutes` / `prefix`), or locally:
 
 ```bash
-uv run python -m ml.lp.ws_features --prefix KXWC --minutes 90   # capture -> data/ws_features.csv
+uv run python -m core.capture.ws_features --prefix KXWC --minutes 90   # capture -> data/ws_features.csv
 uv run python -m ingestion.ws_feature_storage                    # land -> S3 (or --local-dir ./wh)
 ```
 
@@ -111,8 +111,8 @@ cd dbt && DBT_PROFILES_DIR=. uv run dbt build --select +fct_ws_markout
 day); then:
 
 ```bash
-uv run python -m ml.lp.edge_verdict            # FLOW-TOXIC / FLOW-BENIGN / INCONCLUSIVE /
-uv run python -m ml.lp.edge_verdict --min-days 3   # INSUFFICIENT, per family (early look)
+uv run python -m core.maker.edge_verdict            # FLOW-TOXIC / FLOW-BENIGN / INCONCLUSIVE /
+uv run python -m core.maker.edge_verdict --min-days 3   # INSUFFICIENT, per family (early look)
 ```
 
 Day-block bootstrap CIs, split-half stability, and instrument controls: ITF / MLB-GAME are

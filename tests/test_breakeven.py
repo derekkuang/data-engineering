@@ -1,4 +1,4 @@
-"""Unit tests for the Step 0 breakeven math (`ml.lp.breakeven`).
+"""Unit tests for the Step 0 breakeven math (`strategies.soccer_mm.breakeven`).
 
 The go/no-go for club soccer rests on these pure functions, so they get guarded:
 the OLS line, the bootstrap CI at an arbitrary spread (incl. beyond the fitted grid —
@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from ml.lp.breakeven import _wls_line, fit_family, predict_net
-from ml.lp.classify import market_type, sport
+from core.maker.classify import market_type, sport
+from strategies.soccer_mm.breakeven import _wls_line, fit_family, predict_net
 
 
 def test_wls_line_recovers_known_slope() -> None:

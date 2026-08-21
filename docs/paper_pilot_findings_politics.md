@@ -1,6 +1,6 @@
 # Paper-pilot findings — zero-capital POLITICS-maker toxicity test
 
-Autonomous, **zero-money** test of the politics-maker lead (`ml/research/politics_calibration.py` found the
+Autonomous, **zero-money** test of the politics-maker lead (`strategies/politics_mm/politics_calibration.py` found the
 compression is a GROSS-positive maker edge — favorites underpriced — but gross of news-toxicity + fill-rate +
 months of inventory). Each run paper-makes the **10 most-active political favorites at once** against the
 **live** book (`--markets 10`; simulated fills, no capital, no key — public data), measuring realized

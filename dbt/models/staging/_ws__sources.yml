@@ -4,7 +4,7 @@ sources:
   - name: ws
     description: >
       Read-only WebSocket capture of in-play market microstructure (landed by
-      ingestion/ws_feature_storage.py from ml/lp/ws_features.py). Per market per snapshot:
+      ingestion/ws_feature_storage.py from core/capture/ws_features.py). Per market per snapshot:
       book shape + imbalance, trade flow, and mid vol/drift — the feature store for the
       toxicity/selection model and the source for the markout label.
     database: awsdatacatalog   # Athena catalog

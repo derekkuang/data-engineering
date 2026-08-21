@@ -34,20 +34,20 @@ capture=July).
 
 ```bash
 # 0. read-only: creds + balance + positions
-uv run python -m ml.lp.lp_live --auth-check
+uv run python -m core.maker.lp_live --auth-check
 
 # 1. confirm a Liga MX game is live + the book is in-play-wide (read-only)
-uv run python -m ml.lp.soccer_screen --leagues MEX
+uv run python -m strategies.soccer_mm.soccer_screen --leagues MEX
 
 # 2. (optional, one-time) validate the order create/list/cancel plumbing — a $0.02 unfillable bid
-uv run python -m ml.lp.lp_live --test-order
+uv run python -m core.maker.lp_live --test-order
 
 # 3. LAUNCH — two processes, same window, same league:
 #    (a) the paired capture (its own terminal) — the microstructure the correlation needs
-uv run python -m ml.lp.ws_features --prefix KXLIGAMX --minutes 60
+uv run python -m core.capture.ws_features --prefix KXLIGAMX --minutes 60
 
 #    (b) the pilot maker (REST book; simplest/proven path for a first run)
-uv run python -m ml.lp.lp_live --live --i-understand-live \
+uv run python -m core.maker.lp_live --live --i-understand-live \
     --pilot KXLIGAMX --prefix KXLIGAMX --minutes 60
 ```
 
@@ -65,14 +65,14 @@ uv run python -m ml.lp.lp_live --live --i-understand-live \
   ticker, stop — the gate is wrong.
 - Per-market P&L + the running session total. Stop if it hits -$5 (it self-kills), or if the game
   ends / books go one-sided.
-- Panic: `uv run python -m ml.lp.lp_live --cancel-all` cancels all resting orders.
+- Panic: `uv run python -m core.maker.lp_live --cancel-all` cancels all resting orders.
 
 ## After the run — what it answers
 
 ```bash
-uv run python -m ml.lp.lp_analyze                       # session P&L + markout, by config
-uv run python -m ml.lp.realized_toxicity --by family    # LIGAMX/SPREAD realized fill-markout
-uv run python -m ml.lp.breakeven --leagues MEX          # place the realized numbers on the curve
+uv run python -m core.maker.lp_analyze                       # session P&L + markout, by config
+uv run python -m core.maker.realized_toxicity --by family    # LIGAMX/SPREAD realized fill-markout
+uv run python -m strategies.soccer_mm.breakeven --leagues MEX          # place the realized numbers on the curve
 ```
 
 - **Capture-efficiency transfer:** is Liga MX realized capture near WC/SPREAD's κ≈0.28, or the

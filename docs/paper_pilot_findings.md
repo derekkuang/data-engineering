@@ -1,6 +1,6 @@
 # Paper-pilot findings — zero-capital live soccer market-making
 
-Autonomous, **zero-money** test of the club-soccer maker edge (`ml/lp/lp_paper_pilot.py`, scheduled by
+Autonomous, **zero-money** test of the club-soccer maker edge (`core/maker/lp_paper_pilot.py`, scheduled by
 `.github/workflows/paper-pilot.yml`). Each run quotes a maker at the touch against the **live** Kalshi
 book and **simulates** fills (no capital, no trading key — public market data only), measuring realized
 capture + markout at seconds resolution on whatever club-soccer game is most active at the time.

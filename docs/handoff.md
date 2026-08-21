@@ -29,10 +29,10 @@ project; durable value = the platform + the honest "efficient to the limits of a
   like our results; markets LEAD news/futures/sportsbooks in price discovery).
 - **THE ONE THIN REAL EDGE = Kalshi in-play SOCCER market-making** (WC/SPREAD: +0.59c spread capture − 0.135c
   toxicity). Whether it TRANSFERS from World Cup to year-round club soccer is the open question, resolvable
-  ONLY by real fills. Pick-off risk rule (`ml/research/pickoff_dynamics.py`): jumps are warn-able via the
+  ONLY by real fills. Pick-off risk rule (`core/maker/pickoff_dynamics.py`): jumps are warn-able via the
   TAPE (trade/flow/vol AUC ~0.8) but a PULL signal not a lean → monitor tape, pull on a surge.
 - **THE ONE GROSS-POSITIVE LEAD (08-07, first of the whole hunt) = POLITICS MAKER — paper phase CLOSED 08-10.**
-  `ml/research/politics_calibration.py` (3,968-resolved-market calibration + 3-regime backtest): politics
+  `strategies/politics_mm/politics_calibration.py` (3,968-resolved-market calibration + 3-regime backtest): politics
   prices are compressed toward 50% (favorites underpriced, slope ~1.25-1.33, ECE 0.026 vs crypto 0.007).
   UNtradeable as a taker (trapped in spread+fee), but **GROSS-positive as a maker** — MID +2-3.6%/ct,
   MAKER@bid +3.4-7.3%/ct, event-block CIs entirely > 0. **PAPER PHASE VERDICT (08-10, 7 sessions/~640 fills,

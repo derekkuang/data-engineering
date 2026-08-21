@@ -7,9 +7,9 @@ from datetime import date
 
 import pytest
 
-from ml.lp import lp_gate
-from ml.lp.edge_verdict import JUMP_TOXIC_FLOOR, emit_quotable, jump_state_for, tier_for
-from ml.lp.quotable import load_quotable
+from core.maker import lp_gate
+from core.maker.edge_verdict import JUMP_TOXIC_FLOOR, emit_quotable, jump_state_for, tier_for
+from core.maker.quotable import load_quotable
 
 ROWS: list[dict[str, object]] = [
     {"family": "WC/SPREAD", "breadth": "SINGLE_NAME", "verdict": "FLOW-BENIGN", "tier": "CONFIRMED",
