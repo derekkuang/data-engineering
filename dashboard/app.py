@@ -145,7 +145,7 @@ def main() -> None:
         st.warning("No series match the current filters.")
         return
 
-    st.plotly_chart(scatter(view), use_container_width=True)
+    st.plotly_chart(scatter(view), width='stretch')
 
     left, right = st.columns([3, 2])
     with left:
@@ -160,11 +160,11 @@ def main() -> None:
         })
         fmt = {"near_spr_c": "{:.1f}", "vol_24h": "{:,.0f}", "capture_$": "${:,.0f}"}
         st.dataframe(
-            top.style.format(fmt), hide_index=True, use_container_width=True,
+            top.style.format(fmt), hide_index=True, width='stretch',
         )
     with right:
         st.subheader("Capture by category")
-        st.plotly_chart(category_bar(view), use_container_width=True)
+        st.plotly_chart(category_bar(view), width='stretch')
 
     st.caption(
         "Read: the shaded 2–15c band on the scatter is the makeable retail zone; points at ~100c "
