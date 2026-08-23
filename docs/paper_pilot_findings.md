@@ -258,3 +258,56 @@ fill. POSITIVE net across horizons => a maker plausibly profits here -> a real
 Phase-B candidate. Reminder: fill rate is an UPPER BOUND (queue ignored); only
 live resting orders (Phase B) give the true rate. Markout is queue-independent.
 ```
+
+## 2026-08-23 03:40 UTC — paper pilot (soccer)
+```
+Paper-quoting KXLIGAMXGAME-26AUG22CRAATL-ATL for 30 min (poll 4s) ...
+  15 sweeps, 179 fills so far
+  30 sweeps, 275 fills so far
+  45 sweeps, 385 fills so far
+  60 sweeps, 567 fills so far
+  75 sweeps, 628 fills so far
+  90 sweeps, 834 fills so far
+  105 sweeps, 1095 fills so far
+  120 sweeps, 1292 fills so far
+  135 sweeps, 1468 fills so far
+  150 sweeps, 1583 fills so far
+  165 sweeps, 1666 fills so far
+  180 sweeps, 1749 fills so far
+  195 sweeps, 1817 fills so far
+  210 sweeps, 1861 fills so far
+  225 sweeps, 1913 fills so far
+  240 sweeps, 1956 fills so far
+  255 sweeps, 1993 fills so far
+  270 sweeps, 2044 fills so far
+  285 sweeps, 2084 fills so far
+  300 sweeps, 2141 fills so far
+  315 sweeps, 2177 fills so far
+  330 sweeps, 2220 fills so far
+  345 sweeps, 2274 fills so far
+  360 sweeps, 2312 fills so far
+  375 sweeps, 2346 fills so far
+  390 sweeps, 2387 fills so far
+  405 sweeps, 2430 fills so far
+  420 sweeps, 2492 fills so far
+  435 sweeps, 2546 fills so far
+  450 sweeps, 2603 fills so far
+
+======================================================================
+PAPER LP PILOT — KXLIGAMXGAME-26AUG22CRAATL-ATL
+======================================================================
+ran 29.9 min, 450 polls, avg spread 1.1c
+(upper-bound) fills: 2603   buys: 740   sells: 1863   net inventory: -1123
+
+gross edge captured (Σ side·(mid−fill)) : +1507.5c over 2603 fills = +0.58c/fill
+ horizon  fills w/ mark   mean markout   mean net pnl
+-----------------------------------------------------
+    15s           2595         -0.11c         +0.47c
+    30s           2580         -0.18c         +0.40c
+    60s           2546         -0.49c         +0.09c
+
+Read: markout<0 = adverse selection (toxic); net pnl = edge + markout per
+fill. POSITIVE net across horizons => a maker plausibly profits here -> a real
+Phase-B candidate. Reminder: fill rate is an UPPER BOUND (queue ignored); only
+live resting orders (Phase B) give the true rate. Markout is queue-independent.
+```
