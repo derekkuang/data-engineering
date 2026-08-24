@@ -13,6 +13,13 @@ name: ws in-play capture
 
 on:
   schedule:
+    # Big-five European club slate (added 2026-08-24, season ramp): three 180-min SOCCER-only
+    # windows blanketing 11:30–20:30 UTC — EPL lunch 11:30 through La Liga/Serie A/Ligue 1
+    # evening kickoffs ~18:45–19:45 UTC. Idles cheaply on non-match days (soccer prefix = no
+    # active markets -> no capture); repo is public so Actions minutes are free.
+    - cron: "30 11 * * *"  # Euro early slate (EPL lunch, Bundesliga/EPL 13:30-14:00) -> SOCCER, 180m
+    - cron: "30 14 * * *"  # Euro mid slate (EPL/La Liga/Ligue 1 15:00-16:30)         -> SOCCER, 180m
+    - cron: "30 17 * * *"  # Euro evening slate (Serie A 18:45, La Liga 19:30, MNF)   -> SOCCER, 180m
     - cron: "0 19 * * *"   # ~afternoon Europe / midday US        -> --wide (controls + Euro board)
     - cron: "0 23 * * *"   # ~evening Europe / afternoon US        -> --wide (controls + US board)
     - cron: "0 0 * * *"    # ~prime Americas club-soccer kickoff   -> SOCCER-only capture
@@ -75,13 +82,15 @@ jobs:
         run: |
           SOCCER="KXMLS,KXLIGAMX,KXBRASILEIRO,KXCOPADOBRASIL,KXALLSVENSKAN,KXELITESERIEN,KXDENSUPERLIGA,KXEPL,KXLALIGA,KXSERIEA,KXBUNDESLIGA,KXLIGUE1,KXUCL,KXUEL,KXEREDIVISIE,KXEFLCHAMPIONSHIP,KXSAUDIPL"
           PREFIX="$CAPTURE_PREFIX"
+          MINUTES="$CAPTURE_MINUTES"
           case "${{ github.event.schedule }}" in
             "0 0 * * *"|"0 2 * * *") PREFIX="$SOCCER" ;;
+            "30 11 * * *"|"30 14 * * *"|"30 17 * * *") PREFIX="$SOCCER"; MINUTES=180 ;;
           esac
           if [ -n "$PREFIX" ]; then
-            uv run python -m core.capture.ws_features --minutes "$CAPTURE_MINUTES" --wide --prefix "$PREFIX"
+            uv run python -m core.capture.ws_features --minutes "$MINUTES" --wide --prefix "$PREFIX"
           else
-            uv run python -m core.capture.ws_features --minutes "$CAPTURE_MINUTES" --wide
+            uv run python -m core.capture.ws_features --minutes "$MINUTES" --wide
           fi
 
       # The capture step outlives the 1-hour OIDC session (90+ min), so the job-start
