@@ -78,6 +78,12 @@ def yes_token(market: dict[str, Any]) -> str | None:
     return str(toks[0]) if toks else None
 
 
+def no_token(market: dict[str, Any]) -> str | None:
+    """The market's index-1 ("No") CLOB token id, or None if unparseable."""
+    toks = _jget(market.get("clobTokenIds"), [])
+    return str(toks[1]) if len(toks) > 1 else None
+
+
 # ------------------------------------------------------------------------------ books
 
 
@@ -195,4 +201,48 @@ def basket_quote(
         sum_bid=sum(q.best_bid for q in qs),
         min_ask_size=min(q.ask_size for q in qs),
         min_bid_size=min(q.bid_size for q in qs),
+    )
+
+
+@dataclass(frozen=True)
+class SellBasketExec:
+    """The EXECUTABLE form of a sell-basket flag. You cannot naked-short a Yes leg on
+    Polymarket; the real trade is BUYING every No leg. On an N-outcome MECE field exactly
+    N−1 outcomes resolve No, so buying one No in each pays out $(N−1). The arb is real iff
+    ``sum_no_ask < N − 1`` (algebraically the exact twin of the Yes-bid ``Σbid > 1`` flag,
+    since No-ask ≈ 1 − Yes-bid). ``edge`` is normalized back to $/set (per $1 of exposure)
+    so it's comparable to the Yes-side ``sell_edge``; ``min_no_ask_size`` is the binding
+    executable depth across the No legs."""
+
+    slug: str
+    n_outcomes: int
+    sum_no_ask: float
+    min_no_ask_size: float
+
+    @property
+    def edge(self) -> float:
+        # profit $(N−1 − Σ No-ask) over N−1 sets of $1 exposure -> per-$1:
+        denom = self.n_outcomes - 1
+        return (denom - self.sum_no_ask) / denom if denom else 0.0
+
+
+def verify_sell_basket(c: httpx.Client, event: dict[str, Any]) -> SellBasketExec | None:
+    """Depth-weighted executable check of a sell-basket flag via the No legs. None if the
+    field isn't scorable (not negRisk, <3 live legs, or any No leg one-sided)."""
+    if not event.get("negRisk"):
+        return None
+    markets = [m for m in (event.get("markets") or []) if not m.get("closed")]
+    no_tokens = [t for m in markets if (t := no_token(m))]
+    if len(no_tokens) < 3:
+        return None
+    books = fetch_books(c, no_tokens)
+    quotes = [leg_quote(books[t]) for t in no_tokens if t in books]
+    qs = [q for q in quotes if q is not None]
+    if len(qs) < 3 or len(qs) != len(no_tokens):
+        return None  # a one-sided No leg -> not cleanly executable
+    return SellBasketExec(
+        slug=str(event.get("slug", "")),
+        n_outcomes=len(qs),
+        sum_no_ask=sum(q.best_ask for q in qs),
+        min_no_ask_size=min(q.ask_size for q in qs),
     )

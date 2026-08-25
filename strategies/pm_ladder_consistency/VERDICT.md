@@ -1,7 +1,7 @@
 # pm_ladder_consistency — Polymarket NegRisk basket-arb screen
 
-**Status: SCREEN BUILT + FIRST READ 2026-08-24 — leans SEALED (buy-basket), 2 thin
-sell-side flags pending depth-weighted verification. READ-ONLY, $0.**
+**Status: CLOSED 2026-08-24 — SEALED (null), the fee-free twin of the Kalshi
+threshold-arb null. READ-ONLY, $0.**
 
 **Thesis.** On a mutually-exclusive-and-exhaustive (MECE) NegRisk field the Yes legs must
 sum to $1. Fee-free Polymarket *might* leave executable complement arbs that Kalshi's
@@ -21,16 +21,22 @@ null). Buy every Yes leg for `Σask < 1` → bank `1 − Σask` risk-free; sell 
   bots. This is the "median honest, tails thin+illiquid" pattern seen on every competed
   axis in the repo.
 
-**Open (before any believe).** The sell-basket edge is measured via Yes-leg *bids*, which
-assumes you can short at the touch; the truly executable form is buying every **No** leg
-(`Σ No-ask`), a different and usually worse number. The honest close needs (a) No-leg
-depth-weighted execution on the 2 flags, and (b) persistence — does either flag survive
-minutes, or is it a stale-quote flicker? Both are cheap follow-ups on the same client.
+**Executable close (`--verify`, No-leg check).** A Yes-bid `Σbid>1` flag is not a real
+trade — you can't naked-short a Yes leg; the executable form is BUYING every No leg
+(`verify_sell_basket`: arb iff `Σ No-ask < N−1`, the exact twin of `Σ Yes-bid > 1`). Two
+findings killed the flags: (1) **non-persistence** — the sell flags drifted between two
+snapshots minutes apart (2 → 1; the +1.3c `blast-open-porto` flag evaporated), the
+signature of stale-quote flicker, not a standing arb; (2) **not executable** — the one
+persistent flag (`pro-football-2027-champion`) has a **one-sided No leg**, so the basket
+literally can't be bought. No buy-basket arb ever appeared.
 
-**Expected verdict:** NULL, same as Kalshi — the mispricing is real at the mid but sits
-inside spread + leg-count execution risk. Value is the repeatable, liveness-gated
-measurement + the reusable `ingestion/polymarket.py` read client.
+**VERDICT: SEALED (null).** Fee-free Polymarket prices its MECE complements as tightly as
+fee-bound Kalshi prices its threshold ladders — bots hold the seam; the residual
+inversions sit inside the spread / are un-executable. Same wall as everything competed.
+Value delivered: a repeatable, liveness-gated, executable-verified measurement + the
+reusable `ingestion/polymarket.py` client that unlocks P2 (cross-venue basis) and P3
+(calibration).
 
-Files: `basket_screen.py`. Client: `ingestion/polymarket.py` (`POST /books` batch fetch —
-one round trip per field, so a 128-leg field is scannable at high RTT; liveness gate
-rejects dead day-of ladders that naively read as arbs).
+Files: `basket_screen.py` (`--verify` = No-leg executable check). Client:
+`ingestion/polymarket.py` (`POST /books` batch fetch — one round trip per field, so a
+128-leg field is scannable at high RTT; liveness gate rejects dead day-of ladders).

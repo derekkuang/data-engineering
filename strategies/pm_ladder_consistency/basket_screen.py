@@ -61,6 +61,31 @@ def scan(
     return out
 
 
+def verify_flags(slugs: list[str]) -> None:
+    """For each flagged field, run the EXECUTABLE No-leg check (buy every No leg). This is
+    the honest form of a sell-basket flag — a Yes-bid Σbid>1 snapshot rarely survives it,
+    because the No legs carry their own spread and the arb is capped by the thinnest leg."""
+    if not slugs:
+        return
+    print("\n" + "=" * 96)
+    print("EXECUTABLE VERIFICATION — buy-every-No-leg (the real trade behind a sell flag)")
+    print("=" * 96)
+    with pm.client() as c:
+        for slug in slugs:
+            evs = c.get(f"{pm.GAMMA}/events", params={"slug": slug}).json()
+            if not evs:
+                print(f"  {slug[:50]}: event not found")
+                continue
+            ex = pm.verify_sell_basket(c, evs[0])
+            if ex is None:
+                print(f"  {slug[:50]}: not cleanly executable (a No leg is one-sided)")
+                continue
+            real = ex.edge > ARB_THRESHOLD
+            print(f"  {slug[:44]:46s} {ex.n_outcomes:>3} legs  Σno-ask {ex.sum_no_ask:.3f} "
+                  f"(vs N-1={ex.n_outcomes-1})  edge {ex.edge:>+.4f}/set  "
+                  f"minDepth {ex.min_no_ask_size:>6,.0f}  {'REAL' if real else 'inside spread'}")
+
+
 def report(rows: list[pm.BasketQuote]) -> dict[str, Any]:
     rows.sort(key=lambda b: b.volume_24h, reverse=True)
     print("=" * 96)
@@ -111,11 +136,15 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=250, help="top-N events by 24h volume to consider")
     ap.add_argument("--max-outcomes", type=int, default=40, help="skip fields with more legs")
     ap.add_argument("--min-volume", type=float, default=10_000.0, help="min 24h volume ($)")
+    ap.add_argument("--verify", action="store_true",
+                    help="run the executable No-leg check on any flagged field")
     ap.add_argument("--json", type=str, default=None, help="also write the full result as JSON")
     args = ap.parse_args()
 
     rows = scan(limit=args.limit, max_outcomes=args.max_outcomes, min_volume=args.min_volume)
     result = report(rows)
+    if args.verify:
+        verify_flags(list(result["buy_arbs"]) + list(result["sell_arbs"]))
     if args.json:
         with open(args.json, "w") as f:
             json.dump(result, f, indent=2)
