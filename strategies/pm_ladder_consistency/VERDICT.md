@@ -30,9 +30,19 @@ signature of stale-quote flicker, not a standing arb; (2) **not executable** —
 persistent flag (`pro-football-2027-champion`) has a **one-sided No leg**, so the basket
 literally can't be bought. No buy-basket arb ever appeared.
 
-**VERDICT: SEALED (null).** Fee-free Polymarket prices its MECE complements as tightly as
-fee-bound Kalshi prices its threshold ladders — bots hold the seam; the residual
-inversions sit inside the spread / are un-executable. Same wall as everything competed.
+**VERDICT: SEALED (null).** Polymarket prices its MECE complements as tightly as Kalshi
+prices its threshold ladders — bots hold the seam; the residual inversions sit inside the
+spread / are un-executable. Same wall as everything competed.
+
+**Literature confirms it independently** (`docs/research/polymarket_structural_edge_2026.md`,
+deep-research 2026-08-24): NegRisk basket arb is real but **bot-saturated** — median
+converter profit collapsed to ~0.08 USDC by early 2026, violation windows ~16s, sub-100ms
+bots capture ~73%, and exploitable violations are almost entirely YES-side (the NO path is
+structurally one-directional — which is exactly why our No-leg executable check found a
+one-sided leg). Two premises that would have reopened it are also dead: Polymarket is **no
+longer zero-fee** (category taker fees ~1–1.75c since 2026, maker $0), and the regulated US
+venue (QCX) has **no documented public API**. Our measured 1.020/0.980 IS the saturated
+2026 equilibrium.
 Value delivered: a repeatable, liveness-gated, executable-verified measurement + the
 reusable `ingestion/polymarket.py` client that unlocks P2 (cross-venue basis) and P3
 (calibration).

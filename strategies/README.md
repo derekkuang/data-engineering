@@ -14,7 +14,7 @@ lives in `core/`; the data pipeline in `ingestion/` + `dbt/`.
 | [`btc_direction/`](btc_direction/VERDICT.md) | CLOSED | ~10 axes, all null net of cost; the 15-min market is calibrated (ECE 0.5%) and the +8% backtest was a latency artifact. |
 | [`weather_taker/`](weather_taker/VERDICT.md) | CLOSED | Market well-calibrated (ECE 2–4%); no taker edge clears spread+fee; maker angle dead (−0.44c convergence pick-off). |
 | [`tennis/`](tennis/VERDICT.md) | CLOSED | In-play tennis is a martingale at tradable horizons; also jump-TOXIC for makers. |
-| [`pm_ladder_consistency/`](pm_ladder_consistency/VERDICT.md) | CLOSED | Polymarket NegRisk basket-arb SEALED (null) — median Σask 1.020, 0 buy-arbs; sell flags non-persistent + un-executable (one-sided No leg). Fee-free twin of the Kalshi threshold-arb null. |
+| [`pm_ladder_consistency/`](pm_ladder_consistency/VERDICT.md) | CLOSED | Polymarket NegRisk basket-arb SEALED (null) — median Σask 1.020, 0 buy-arbs; lit confirms bot-saturation (~0.08 USDC/conv, ~16s windows) + venue no longer zero-fee + QCX has no API. See [pm structural-edge research](../docs/research/polymarket_structural_edge_2026.md). |
 | [`polymarket/`](polymarket/VERDICT.md) | CLOSED | 1c spreads kill capture; rewards cover ~2% of goal pick-off; the edge is Kalshi-retail-specific. |
 | [`cross_venue/`](cross_venue/VERDICT.md) | CLOSED | Kalshi↔Polymarket race, binary↔perp basis, PM-vs-sportsbook divergence — all null. |
 | [`parlays/`](parlays/VERDICT.md) | CLOSED | MVE parlay bias is real (~1.4×) but structurally uncapturable (buy-only book). |

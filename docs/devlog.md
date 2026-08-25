@@ -4,6 +4,27 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-08-24 — Polymarket branch: built the read client + basket screen, then CLOSED the venue by evidence
+
+Derek wanted to branch out to Polymarket. Built the reusable read layer and one screen, measured it live, and — with a deep-research pass corroborating — concluded the whole venue is closed for us. The build is real and reusable; the trading conclusion is negative and that's the honest outcome.
+
+**Built (committed, ruff + strict mypy clean):**
+- `ingestion/polymarket.py` — read-only Gamma + CLOB client. Load-bearing detail: `POST /books` fetches a whole MECE field's order books in ONE round trip, so a 128-outcome field is scannable at the ~1s RTT we get from outside the US (the naive per-leg `GET /book` timed out my first ad-hoc scan). Liveness gate: a one-sided leg → field unscored, so dead day-of ladders don't masquerade as arbs.
+- `strategies/pm_ladder_consistency/basket_screen.py` (+ `--verify`) — scores every liquid NegRisk field for complement consistency (Yes legs must sum to $1), and the `--verify` mode runs the EXECUTABLE No-leg check (you can't naked-short a Yes; the real trade is buying every No leg — arb iff `Σ No-ask < N−1`).
+
+**Measured (P1):** median Σask 1.020 / Σbid 0.980 across 24 liquid fields, **zero buy-basket arbs**. The 2 sell-side flags were non-persistent (drifted 2→1 across snapshots minutes apart) and the one that persisted had a one-sided No leg (basket literally un-buyable). SEALED — the fee-free-venue twin of our Kalshi threshold-arb null.
+
+**Deep-research (`docs/research/polymarket_structural_edge_2026.md`, 23/25 claims verified) independently closed the branch on three legs:**
+1. **Structural edge is bot-saturated.** NegRisk basket arb is real and common (662/1,578 markets) but harvested by sub-second bots to ~0.08 USDC/conversion by early 2026 (down from ~1.0 in 2024), violation windows ~16s, YES-side-only (the NO path is one-directional — exactly why our No-leg check hit a dead leg). Our 1.020 IS the saturated equilibrium.
+2. **The core thesis is dead — Polymarket is no longer zero-fee.** Category taker fees (~1–1.75c) since 2026, maker $0, only geopolitical fee-free. The one structural advantage over Kalshi's fee evaporated. Reason to branch here → gone.
+3. **Execution door shut.** Offshore is close-only for US persons regardless of IP (geoblock confirmed: our US-routed connection read `blocked:true`, the Indonesian IP read `blocked:false` — but a US person can't run a system that goes close-only the day they fly home). Regulated QCX (Polymarket US) is a live CFTC DCM but has **no documented public API** — no programmatic door.
+
+Plus: the only robust Polymarket anomaly is **politics underconfidence (slope 1.45)**, which merely re-confirms our Kalshi politics-compression edge (`strategies/politics_mm/`) — not new. General favorite-longshot bias was REFUTED as a Polymarket edge.
+
+**Verdict:** Polymarket stays a free **data/calibration venue only**; the tradeable edge remains Kalshi-retail-specific. Revisit trigger: QCX ships a public trading API AND lists market types with a measurable edge. Net for the day: a clean reusable Polymarket ingestion client + a repeatable executable-verified screen + a decisive, sourced negative — the platform gets stronger, the trading map gets one axis honestly closed. Focus returns to Kalshi (Liga MX pilot, big-five capture accumulating).
+
+---
+
 ## 2026-08-21 — REORG: `ml/` → `core/` + `strategies/` — the repo now says what it became
 
 The project's identity shifted from "one crypto DE pipeline" to "a platform for finding edges on Kalshi, many strategies, one reusable workflow" — but the code still said the former (organized by *status*: `ml/lp` active, `ml/alpha`/`ml/research` closed). Flipped it to organize by *role*:
