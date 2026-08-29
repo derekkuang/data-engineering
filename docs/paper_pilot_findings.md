@@ -480,3 +480,56 @@ No actively-trading benign market found right now. Pass --ticker.
 ```
 No actively-trading benign market found right now. Pass --ticker.
 ```
+
+## 2026-08-29 20:11 UTC — paper pilot (soccer)
+```
+Paper-quoting KXLALIGATOTAL-26AUG29SEVATM-5 for 30 min (poll 4s) ...
+  15 sweeps, 106 fills so far
+  30 sweeps, 129 fills so far
+  45 sweeps, 154 fills so far
+  60 sweeps, 170 fills so far
+  75 sweeps, 190 fills so far
+  90 sweeps, 213 fills so far
+  105 sweeps, 238 fills so far
+  120 sweeps, 257 fills so far
+  135 sweeps, 266 fills so far
+  150 sweeps, 280 fills so far
+  165 sweeps, 289 fills so far
+  180 sweeps, 296 fills so far
+  195 sweeps, 301 fills so far
+  210 sweeps, 305 fills so far
+  225 sweeps, 318 fills so far
+  240 sweeps, 324 fills so far
+  255 sweeps, 331 fills so far
+  270 sweeps, 335 fills so far
+  285 sweeps, 341 fills so far
+  300 sweeps, 347 fills so far
+  315 sweeps, 352 fills so far
+  330 sweeps, 358 fills so far
+  345 sweeps, 370 fills so far
+  360 sweeps, 377 fills so far
+  375 sweeps, 384 fills so far
+  390 sweeps, 399 fills so far
+  405 sweeps, 416 fills so far
+  420 sweeps, 433 fills so far
+  435 sweeps, 456 fills so far
+  450 sweeps, 471 fills so far
+
+======================================================================
+PAPER LP PILOT — KXLALIGATOTAL-26AUG29SEVATM-5
+======================================================================
+ran 29.9 min, 450 polls, avg spread 1.5c
+(upper-bound) fills: 471   buys: 135   sells: 336   net inventory: -201
+
+gross edge captured (Σ side·(mid−fill)) : +416.0c over 471 fills = +0.88c/fill
+ horizon  fills w/ mark   mean markout   mean net pnl
+-----------------------------------------------------
+    15s            467         -0.02c         +0.84c
+    30s            466         -0.04c         +0.83c
+    60s            456         -0.11c         +0.77c
+
+Read: markout<0 = adverse selection (toxic); net pnl = edge + markout per
+fill. POSITIVE net across horizons => a maker plausibly profits here -> a real
+Phase-B candidate. Reminder: fill rate is an UPPER BOUND (queue ignored); only
+live resting orders (Phase B) give the true rate. Markout is queue-independent.
+```
