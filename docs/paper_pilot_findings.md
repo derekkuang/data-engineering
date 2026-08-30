@@ -533,3 +533,56 @@ fill. POSITIVE net across horizons => a maker plausibly profits here -> a real
 Phase-B candidate. Reminder: fill rate is an UPPER BOUND (queue ignored); only
 live resting orders (Phase B) give the true rate. Markout is queue-independent.
 ```
+
+## 2026-08-30 06:07 UTC — paper pilot (soccer)
+```
+Paper-quoting KXEPL2H-26AUG30MUNIPS-IPS for 30 min (poll 4s) ...
+  15 sweeps, 0 fills so far
+  30 sweeps, 0 fills so far
+  45 sweeps, 0 fills so far
+  60 sweeps, 0 fills so far
+  75 sweeps, 0 fills so far
+  90 sweeps, 0 fills so far
+  105 sweeps, 0 fills so far
+  120 sweeps, 0 fills so far
+  135 sweeps, 0 fills so far
+  150 sweeps, 0 fills so far
+  165 sweeps, 0 fills so far
+  180 sweeps, 0 fills so far
+  195 sweeps, 0 fills so far
+  210 sweeps, 0 fills so far
+  225 sweeps, 0 fills so far
+  240 sweeps, 0 fills so far
+  255 sweeps, 0 fills so far
+  270 sweeps, 0 fills so far
+  285 sweeps, 0 fills so far
+  300 sweeps, 0 fills so far
+  315 sweeps, 2 fills so far
+  330 sweeps, 2 fills so far
+  345 sweeps, 2 fills so far
+  360 sweeps, 2 fills so far
+  375 sweeps, 2 fills so far
+  390 sweeps, 2 fills so far
+  405 sweeps, 2 fills so far
+  420 sweeps, 2 fills so far
+  435 sweeps, 2 fills so far
+  450 sweeps, 2 fills so far
+
+======================================================================
+PAPER LP PILOT — KXEPL2H-26AUG30MUNIPS-IPS
+======================================================================
+ran 29.9 min, 450 polls, avg spread 3.4c
+(upper-bound) fills: 2   buys: 0   sells: 2   net inventory: -2
+
+gross edge captured (Σ side·(mid−fill)) : +3.0c over 2 fills = +1.50c/fill
+ horizon  fills w/ mark   mean markout   mean net pnl
+-----------------------------------------------------
+    15s              2         +0.00c         +1.50c
+    30s              2         +0.00c         +1.50c
+    60s              2         +0.00c         +1.50c
+
+Read: markout<0 = adverse selection (toxic); net pnl = edge + markout per
+fill. POSITIVE net across horizons => a maker plausibly profits here -> a real
+Phase-B candidate. Reminder: fill rate is an UPPER BOUND (queue ignored); only
+live resting orders (Phase B) give the true rate. Markout is queue-independent.
+```
