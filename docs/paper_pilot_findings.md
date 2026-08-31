@@ -745,3 +745,8 @@ fill. POSITIVE net across horizons => a maker plausibly profits here -> a real
 Phase-B candidate. Reminder: fill rate is an UPPER BOUND (queue ignored); only
 live resting orders (Phase B) give the true rate. Markout is queue-independent.
 ```
+
+## 2026-08-31 09:00 UTC — paper pilot (soccer)
+```
+No actively-trading benign market found right now. Pass --ticker.
+```
