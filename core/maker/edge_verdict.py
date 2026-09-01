@@ -71,6 +71,62 @@ from crypto_marts.fct_toxicity_by_family
 where n_flow_obs > 0
 """
 
+# European club-soccer leagues the captured data shows share ONE SPREAD/TOTAL toxicity
+# profile (per-league jump 0.02–0.17c, all sub-0.25 — big-five + UCL/UEL + minor European).
+# Pooling them into one family reaches the 8-day floor via their DIFFERENT kickoff schedules
+# (La Liga Fri / EPL Sat / Serie A Sun / UCL midweek) far faster than any single league, with
+# tighter CIs. WC (the benchmark) and Americas leagues (MLS/LigaMX/Brasileiro) stay separate.
+CLUB_SOCCER_POOL = frozenset({
+    "EPL", "LALIGA", "SERIEA", "BUNDESLIGA", "LIGUE1", "UCL_UEL", "SOCCER_OTHER",
+})
+CLUB_SOCCER_LABEL = "CLUB_SOCCER"
+
+
+def pool_club_soccer(tox: pd.DataFrame) -> pd.DataFrame:
+    """Re-aggregate the European club leagues into one CLUB_SOCCER sport per
+    (market_type, capture_day): obs-weighted axis means (flow by n_flow_obs, jump by
+    n_snapshots), so the pooled per-day rows feed the SAME day-block bootstrap unchanged."""
+    mask = tox["sport"].isin(CLUB_SOCCER_POOL)
+    if not mask.any():
+        return tox
+    club = tox[mask].copy()
+    club["sport"] = CLUB_SOCCER_LABEL
+    club["_fw"] = club["avg_flow_markout_c"] * club["n_flow_obs"]
+    club["_jw"] = club["avg_jump_pickoff_c"] * club["n_snapshots"]
+    gp = club.groupby(["sport", "market_type", "capture_day"], as_index=False).agg(
+        breadth=("breadth", "first"),
+        n_snapshots=("n_snapshots", "sum"),
+        n_markets=("n_markets", "sum"),
+        n_flow_obs=("n_flow_obs", "sum"),
+        _fw=("_fw", "sum"),
+        _jw=("_jw", "sum"),
+    )
+    gp["avg_flow_markout_c"] = gp["_fw"] / gp["n_flow_obs"].where(gp["n_flow_obs"] > 0, 1)
+    gp["avg_jump_pickoff_c"] = gp["_jw"] / gp["n_snapshots"].where(gp["n_snapshots"] > 0, 1)
+    gp = gp.drop(columns=["_fw", "_jw"])
+    return pd.concat([tox[~mask], gp], ignore_index=True)
+
+
+def pool_club_soccer_realized(realized: pd.DataFrame) -> pd.DataFrame:
+    """Pool realized fills the same way: sum capture + fills across club leagues, recompute
+    the fills-weighted markout. (No club fills yet -> the pooled family caps at CANDIDATE.)"""
+    mask = realized["sport"].isin(CLUB_SOCCER_POOL)
+    if not mask.any():
+        return realized
+    club = realized[mask].copy()
+    club["sport"] = CLUB_SOCCER_LABEL
+    club["_mw"] = club["realized_markout_c"] * club["fills"]
+    gp = club.groupby(["sport", "market_type"], as_index=False).agg(
+        traded_days=("traded_days", "sum"),
+        fills=("fills", "sum"),
+        capture_usd=("capture_usd", "sum"),
+        _mw=("_mw", "sum"),
+    )
+    gp["realized_markout_c"] = gp["_mw"] / gp["fills"].where(gp["fills"] > 0, 1)
+    gp = gp.drop(columns=["_mw"])
+    return pd.concat([realized[~mask], gp], ignore_index=True)
+
+
 REALIZED_QUERY = """
 select sport, market_type,
        count(distinct et_day)                             as traded_days,
@@ -190,6 +246,9 @@ def main() -> int:
     ap.add_argument("--min-flow-obs", type=int, default=MIN_FLOW_OBS)
     ap.add_argument("--emit", metavar="PATH", default=None,
                     help="write the machine-readable quotable_families.json the bot reads")
+    ap.add_argument("--pool-club-soccer", action="store_true",
+                    help="re-aggregate European club leagues into one CLUB_SOCCER family "
+                         "(reaches the day-floor via their different kickoff schedules)")
     args = ap.parse_args()
 
     load_dotenv()
@@ -200,6 +259,9 @@ def main() -> int:
     )
     tox = pd.read_sql(TOX_QUERY, conn)
     realized = pd.read_sql(REALIZED_QUERY, conn)
+    if args.pool_club_soccer:
+        tox = pool_club_soccer(tox)
+        realized = pool_club_soccer_realized(realized)
     if tox.empty:
         print("fct_toxicity_by_family is EMPTY — no capture data yet. Run/dispatch the WS "
               "capture during live games (docs/setup/09), then `dbt build`, then re-run this.")

@@ -16,11 +16,24 @@ Soccer TOTAL reads jump-benign where tennis/MLB read jump-toxic (`core/maker/edg
 real fills resolve it. `soccer_screen.py`: club near-money spreads are in-band (Liga MX
 widest ~4c).
 
-**Next.** `lp_live --live --i-understand-live --pilot KXLIGAMX --prefix KXLIGAMX --minutes 60`
-+ paired `ws_features --prefix KXLIGAMX`, during a live Liga MX game with Derek present
-(real money, NOT autonomous). Runbook: `docs/setup/10-club-soccer-pilot.md`. Season ramp:
-La Liga Aug 16 → EPL/Ligue 1 Aug 21 → Serie A Aug 22 → Bundesliga Aug 28 (all in
-`ELIGIBLE_PREFIXES`, auto-screened).
+**POOLED CLUB-SOCCER VERDICT (2026-09-02, `edge_verdict --pool-club-soccer`).** Waiting 8
+match-days *per league* is ~2 months (a league plays ~1–2 days/wk). The captured data shows
+the big-five + UCL/UEL + minor European leagues share ONE SPREAD/TOTAL toxicity profile
+(per-league jump 0.02–0.17c, all sub-0.25), so `edge_verdict` now pools them into a
+`CLUB_SOCCER` family (re-aggregated per market_type×capture_day, same day-block bootstrap).
+Pooling reaches the floor via the leagues' DIFFERENT kickoff schedules. Read:
+**`CLUB_SOCCER/SPREAD` — 9 days (floor cleared), jump 0.093 = BENIGN** (the goal-pick-off
+axis that kills makers reads clean, like WC); **`CLUB_SOCCER/TOTAL` — 18 days**, both axes
+trending benign (flow −0.01 [−0.26,+0.20], jump 0.229 point-benign). Neither is CANDIDATE
+yet: the flow-axis CI is still too wide (needs more SPREAD obs to sit under the 0.10 bound)
+AND there are zero real fills (pooled realized capture = None → caps at CANDIDATE regardless).
+So the fail-CLOSED bot still won't auto-quote — correct. The pilot is what resolves both.
+
+**Next.** A live big-five SPREAD/TOTAL pilot (La Liga best-captured): `lp_live --live
+--i-understand-live --pilot KXLALIGA --prefix KXLALIGA --minutes 60` + paired `ws_features
+--prefix KXLALIGA`, during a live match with Derek present (real money, NOT autonomous) —
+its fills give the realized capture + tighten the flow CI toward CONFIRMED. Runbook:
+`docs/setup/10-club-soccer-pilot.md`. All leagues in `ELIGIBLE_PREFIXES`, auto-screened.
 
 **Risk rule.** Jump pick-off is warn-able from the tape (AUC ~0.8) but it's a PULL signal,
 not a lean; expect a small un-dodgeable residual (`core/maker/pickoff_dynamics`).
