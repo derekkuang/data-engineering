@@ -47,6 +47,19 @@ Value delivered: a repeatable, liveness-gated, executable-verified measurement +
 reusable `ingestion/polymarket.py` client that unlocks P2 (cross-venue basis) and P3
 (calibration).
 
-Files: `basket_screen.py` (`--verify` = No-leg executable check). Client:
-`ingestion/polymarket.py` (`POST /books` batch fetch — one round trip per field, so a
-128-leg field is scannable at high RTT; liveness gate rejects dead day-of ladders).
+**Arb route explored + measured (`arb_persistence.py`, 2026-09-01).** Rather than take the
+research's "bot-saturated" on faith, polled the top NegRisk fields for 3 min at ~1s RTT and
+logged every live buy-basket window. Result (172 polls): 3 of 4 fields sealed (Σask ≥ 1
+always); the 4th (`balance-of-power-2026-midterms`) carried a **standing +0.8c** violation
+on ALL 43 polls — not a transient race window but a **stable sub-fee inefficiency the bots
+deliberately leave** (closing 0.8c costs >0.8c in the 2026 taker fee). **Zero of 172 polls
+cleared the 1.5c fee hurdle.** Both walls measured directly from our own connection: the
+fast fee-clearing windows close inside our ~1s reaction (latency wall, as the sub-100ms /
+~2.7–16s research predicted — we never caught one), and the one window we CAN see standing
+is trapped below the fee. Third wall unchanged: execution is the offshore on-chain venue,
+close-only for US persons. Arb route CLOSED for us on all three.
+
+Files: `basket_screen.py` (`--verify` = No-leg executable check), `arb_persistence.py`
+(the latency/fee-wall measurement). Client: `ingestion/polymarket.py` (`POST /books` batch
+fetch — one round trip per field, so a 128-leg field is scannable at high RTT; liveness
+gate rejects dead day-of ladders).
