@@ -26,6 +26,9 @@ from dataclasses import dataclass
 
 import httpx
 
+from core.maker.lp_gate import MIN_RECENT_TRADES, passes_gate
+from core.maker.lp_pilot import is_mean_reverting
+
 KALSHI = "https://external-api.kalshi.com/trade-api/v2"
 
 # The MAKEABLE series (mean-reverting TOTAL/SPREAD), per league. Deliberately excludes
@@ -49,9 +52,11 @@ class Quote:
     """One two-sided book on a makeable market."""
 
     sub: str
+    ticker: str
     bid: int
     ask: int
     vol: int
+    recent_trades: int
 
     @property
     def spread(self) -> int:
@@ -62,17 +67,43 @@ class Quote:
         return (self.ask + self.bid) / 2.0
 
     @property
-    def makeable(self) -> bool:
+    def in_band(self) -> bool:
+        """Spread/mid inside the retail band — necessary but NOT sufficient."""
         return (MIN_SPREAD_C <= self.spread <= MAX_SPREAD_C
                 and MIN_MID_C <= self.mid <= MAX_MID_C)
+
+    @property
+    def makeable(self) -> bool:
+        """What the BOT would actually quote: in-band AND mean-reverting AND past the
+        recent-trade floor. Without the activity floor a pre-game token quote (2-6c spread,
+        ZERO volume) looks 'makeable' while the bot correctly idles on it — wide != rich."""
+        return (self.in_band and is_mean_reverting(self.ticker)
+                and passes_gate(self.ticker, self.recent_trades))
 
 
 Hit = tuple[str, str, str, list[Quote]]
 
 
+def recent_trade_counts(client: httpx.Client) -> dict[str, int]:
+    """Recent trades per ticker from the public tape — the SAME activity signal
+    pick_smooth_ticker gates on (a book with no recent prints cannot be made in)."""
+    try:
+        r = client.get(f"{KALSHI}/markets/trades", params={"limit": 1000})
+        r.raise_for_status()
+        counts: dict[str, int] = {}
+        for t in r.json().get("trades", []):
+            tk = str(t.get("ticker", ""))
+            if tk:
+                counts[tk] = counts.get(tk, 0) + 1
+        return counts
+    except Exception:
+        return {}
+
+
 def scan(client: httpx.Client, prefix: str | None) -> list[Hit]:
     """Every (league, series, event) with at least one two-sided quoted SPREAD/TOTAL book."""
     out = []
+    trades = recent_trade_counts(client)
     for league, series_list in MAKEABLE_SERIES.items():
         for series in series_list:
             if prefix and not series.startswith(prefix):
@@ -88,12 +119,21 @@ def scan(client: httpx.Client, prefix: str | None) -> list[Hit]:
             for e in r.json().get("events", []):
                 quoted: list[Quote] = []
                 for m in e.get("markets") or []:
-                    yb, ya = m.get("yes_bid"), m.get("yes_ask")
+                    # Kalshi returns prices as DOLLAR STRINGS (yes_bid_dollars "0.9500"),
+                    # not the legacy integer-cent `yes_bid`. Reading the old names silently
+                    # yields None -> every book looks unquoted (a false "no game in play").
+                    yb, ya = m.get("yes_bid_dollars"), m.get("yes_ask_dollars")
                     if yb is None or ya is None:
                         continue
+                    bid_c, ask_c = round(float(yb) * 100), round(float(ya) * 100)
+                    if bid_c <= 0 or ask_c <= 0:
+                        continue
+                    tk = str(m["ticker"])
                     quoted.append(Quote(
-                        sub=str(m.get("yes_sub_title", "")),
-                        bid=int(yb), ask=int(ya), vol=int(m.get("volume") or 0)))
+                        sub=str(m.get("yes_sub_title", "")), ticker=tk,
+                        bid=bid_c, ask=ask_c,
+                        vol=int(float(m.get("volume_24h_fp") or 0)),
+                        recent_trades=trades.get(tk, 0)))
                 if quoted:
                     out.append((league, series, str(e.get("title", ""))[:36], quoted))
     return out
@@ -113,20 +153,25 @@ def report(hits: list[Hit]) -> bool:
         n_makeable += len(good)
         print(f"\n{league:11s} {title:38s} ({series})  {len(quoted)} quoted, {len(good)} makeable")
         for q in sorted(quoted, key=lambda x: -x.vol)[:6]:
-            flag = "  <== MAKEABLE" if q.makeable else ""
+            flag = "  <== BOT-QUOTABLE" if q.makeable else (
+                "  (in band, but no recent trades)" if q.in_band else "")
             print(f"    {q.sub[:20]:22s} bid {q.bid:>2} ask {q.ask:>2} "
-                  f"spr {q.spread:>2}c mid {q.mid:>4.1f} vol {q.vol:>5}{flag}")
+                  f"spr {q.spread:>2}c mid {q.mid:>4.1f} vol {q.vol:>5} "
+                  f"trades {q.recent_trades:>3}{flag}")
     print(f"\n{'-' * 88}")
     if n_makeable:
-        print(f"GO — {n_makeable} makeable book(s) live (spread {MIN_SPREAD_C}-{MAX_SPREAD_C}c, "
-              f"mid {MIN_MID_C}-{MAX_MID_C}c).")
+        print(f"GO — {n_makeable} book(s) the bot would actually quote "
+              f"(in band AND >={MIN_RECENT_TRADES} recent trades).")
         print("  Start capture FIRST, then the maker:")
         print("    uv run python -m core.capture.ws_features --prefix KXLALIGA")
         print("    uv run python -m core.maker.lp_live --live --i-understand-live "
               "--pilot KXLALIGA --prefix KXLALIGA --minutes 60")
     else:
-        print("PARTIAL — quoted, but none in the makeable band "
-              f"(spr {MIN_SPREAD_C}-{MAX_SPREAD_C}c, mid {MIN_MID_C}-{MAX_MID_C}c). Keep watching.")
+        n_band = sum(1 for _, _, _, qs in hits for q in qs if q.in_band)
+        print(f"WAIT — books are quoted and {n_band} sit in the spread/mid band, but NONE pass "
+              f"the recent-trade floor (>={MIN_RECENT_TRADES}). Pre-game books are either "
+              "competed to 1c or untraded token quotes; the bot idles on both (wide != rich). "
+              "Real makeable spread appears once a game is IN PLAY.")
     return bool(n_makeable)
 
 

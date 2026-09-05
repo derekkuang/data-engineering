@@ -96,7 +96,7 @@ async def run(
         current = tickers
     elif use_btc:  # smoke path: BTC 15m is always active regardless of sports hours
         mkts = sorted(client.list_markets(SERIES_BTC_15M, status="open"),
-                      key=lambda m: m.get("volume") or 0, reverse=True)
+                      key=lambda m: float(m.get("volume_24h_fp") or 0), reverse=True)
         current = [m["ticker"] for m in mkts[:cap]]
     else:
         current = discover_markets(client, prefixes, cap)
