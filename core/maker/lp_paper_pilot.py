@@ -43,6 +43,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.maker.lp_pilot import enumerate_candidates
 from ingestion.kalshi import KalshiClient
 
 POLL_SECONDS = 4.0
@@ -104,7 +105,8 @@ def best_bid_ask(book: dict[str, Any]) -> tuple[float, float] | None:
 
 
 def pick_benign_tickers(client: KalshiClient, prefixes: tuple[str, ...] | None = None,
-                        series_set: set[str] | None = None, n: int = 1) -> list[str]:
+                        series_set: set[str] | None = None, n: int = 1,
+                        max_per_event: int = 2) -> list[str]:
     """Up to ``n`` most actively-trading MAKEABLE benign markets right now, from the live trade
     feed. ``prefixes`` restricts the universe (e.g. club-soccer prefixes); ``series_set`` (a set of
     series tickers, e.g. all political series from list_series-by-category) OVERRIDES the prefix
@@ -122,12 +124,31 @@ def pick_benign_tickers(client: KalshiClient, prefixes: tuple[str, ...] | None =
             else any(tk.startswith(p) for p in pfx)
         if matched:
             counts[tk] += 1
+    # The shared tape is a fixed 1000-row exchange-wide window, so a high-frequency series
+    # crowds soccer out of it (KXBTC15M held 322/1000; a 138-print/5min book read as ~2).
+    # Add the tape-INDEPENDENT per-series enumeration so those books are visible at all.
+    ordered = [tk for tk, _ in counts.most_common(max(25, 4 * n))]
+    if series_set is None:
+        seen = set(ordered)
+        ordered += [tk for tk in enumerate_candidates(client, pfx) if tk not in seen]
     picked: list[str] = []
-    for tk, _ in counts.most_common(max(25, 4 * n)):
+    per_event: Counter[str] = Counter()
+    for tk in ordered:
+        # DIVERSIFY ACROSS GAMES. The buckets of one match (Over 1.5/2.5/3.5...) are the SAME
+        # bet — a goal moves all of them together — so filling N slots from one game gives N x
+        # the exposure, not N independent samples. That is exactly how a pooled read gets
+        # dominated by a single directional episode. Key on the match segment of the ticker
+        # (KXEPLTOTAL-26SEP05MCICOV-4 -> 26SEP05MCICOV) so TOTAL and SPREAD of the same match
+        # share a budget.
+        parts = tk.split("-")
+        event = parts[1] if len(parts) > 1 else tk
+        if per_event[event] >= max_per_event:
+            continue
         book = client.get_market_orderbook(tk)
         ba = best_bid_ask(book)
         if ba and 0.02 <= (ba[1] - ba[0]) <= 0.15:  # 2-15c spread = makeable, not broken
             picked.append(tk)
+            per_event[event] += 1
             if len(picked) >= n:
                 break
     return picked
