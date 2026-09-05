@@ -285,6 +285,104 @@ def pick_smooth_ticker(
     return None  # nothing mean-reverting active -> idle, don't fall into trending books
 
 
+def pick_smooth_tickers(
+    client: KalshiClient, n: int, prefixes: tuple[str, ...] | None = None,
+    *, max_per_event: int = 2,
+) -> list[str]:
+    """Up to `n` makeable, gate-passing, mean-reverting markets — the multi-market analogue of
+    `pick_smooth_ticker`, with the SAME gates (per-market activity, TOTAL/SPREAD only, spread
+    and mid bands).
+
+    DIVERSIFY ACROSS GAMES (`max_per_event`): the buckets of one match (Over 1.5/2.5/3.5) are
+    the SAME bet — one goal moves them together — so N slots from one game give N x the
+    exposure, not N independent samples. Measured 2026-09-05: a single-market paper run pinned
+    inventory at the cap for its whole session because every fill was one directional episode.
+    Keying on the match segment (KXEPLTOTAL-26SEP05MCICOV-4 -> 26SEP05MCICOV) makes
+    `n` markets mean ~n/max_per_event distinct games."""
+    pfx = prefixes or ELIGIBLE_PREFIXES
+    trades = client.get("/markets/trades", params={"limit": 1000}).get("trades", [])
+    counts: Counter[str] = Counter()
+    for t in trades:
+        tk = t.get("ticker", "")
+        if tk and not any(x in tk for x in EXCLUDE) and not any(j in tk for j in JUMPY):
+            if any(tk.startswith(p) for p in pfx):
+                counts[tk] += 1
+    ordered = [tk for tk, _ in counts.most_common(50)]
+    seen = set(ordered)
+    ordered += [tk for tk in enumerate_candidates(client, pfx) if tk not in seen]
+
+    picked: list[str] = []
+    per_event: Counter[str] = Counter()
+    for tk in ordered:
+        if len(picked) >= n:
+            break
+        if not is_mean_reverting(tk):
+            continue
+        parts = tk.split("-")
+        event = parts[1] if len(parts) > 1 else tk
+        if per_event[event] >= max_per_event:
+            continue
+        if not passes_gate(tk, recent_trade_rate(client, tk)):
+            continue
+        ba = best_bid_ask(client.get_market_orderbook(tk))
+        if ba is None:
+            continue
+        spread, mid = ba[1] - ba[0], (ba[0] + ba[1]) / 2.0
+        if 0.02 <= spread <= 0.15 and MIN_MID <= mid <= MAX_MID:
+            picked.append(tk)
+            per_event[event] += 1
+    return picked
+
+
+def report_multi(pilots: list[Pilot]) -> None:
+    """Pooled report over many inventory-CAPPED markets. Each fill is marked against ITS OWN
+    market's mid path, then pooled — so the markout is a cross-game average rather than one
+    game's directional episode. The per-market table is the honest check: with caps working,
+    max|inv| should sit BELOW the cap and inventory should not sit pegged."""
+    live = [p for p in pilots if p.mids]
+    if not live:
+        print("No market produced a book this session.")
+        return
+    dur = max((p.mids[-1][0] - p.mids[0][0]) / 60.0 for p in live)
+    polls = sum(p.n_polls for p in live)
+    spread_c = 100.0 * sum(p.spread_sum for p in live) / max(polls, 1)
+    n_fills = sum(len(p.fills) for p in live)
+    pooled_pnl = sum(pnl(p, p.mids[-1][1]) for p in live)
+    n_halt = sum(1 for p in live if p.halted)
+    print("\n" + "=" * 78)
+    print(f"LP PILOT v2 — INVENTORY-CAPPED, {len(live)} markets")
+    print("=" * 78)
+    print(f"ran {dur:.1f} min, {polls} polls, avg spread {spread_c:.1f}c"
+          f"{f'   [{n_halt} market(s) HALTED]' if n_halt else ''}")
+    print(f"(upper-bound) fills: {n_fills}   pooled mark-to-mid P&L: ${pooled_pnl:+.2f}   "
+          f"cap +/-{MAX_POSITION}")
+    if not n_fills:
+        print("No fills — markets too quiet this session.")
+        return
+    print(f"\n{'horizon':>8}{'fills w/ mark':>15}{'mean markout':>15}{'mean net pnl':>15}")
+    print("-" * 53)
+    for h in MARKOUT_HORIZONS:
+        marks, nets = [], []
+        for p in live:
+            for f in p.fills:
+                m_h = _mid_at(p, f.ts + h)
+                if m_h is None:
+                    continue
+                marks.append(f.side * (m_h - f.mid_at_fill) * 100.0)
+                nets.append(f.side * (m_h - f.price) * 100.0)
+        if marks:
+            print(f"{h:>6}s{len(marks):>15}{sum(marks) / len(marks):>+14.2f}c"
+                  f"{sum(nets) / len(nets):>+14.2f}c")
+    print(f"\n{'per-market':>34}{'fills':>7}{'inv':>6}{'max|inv|':>10}{'pegged?':>9}")
+    for p in sorted(live, key=lambda x: -len(x.fills)):
+        pegged = "PEGGED" if p.max_abs_inv >= MAX_POSITION else ""
+        print(f"{p.ticker[-32:]:>34}{len(p.fills):>7}{p.inv:>+6d}{p.max_abs_inv:>10}"
+              f"{pegged:>9}")
+    print("\nRead: caps are working iff max|inv| stays BELOW the cap. A market showing PEGGED "
+          "\nwas inventory-constrained — its fills are one directional episode, not two-sided "
+          "\ncapture, and its P&L should be discounted accordingly.")
+
+
 def better_market(
     client: KalshiClient,
     current: str,
@@ -421,10 +519,47 @@ def main() -> int:
     ap.add_argument("--ticker", default=None)
     ap.add_argument("--minutes", type=float, default=20.0)
     ap.add_argument("--poll", type=float, default=POLL_SECONDS)
+    ap.add_argument("--markets", type=int, default=1,
+                    help="quote N markets at once, each with its OWN inventory cap + kill "
+                         "switch; diversified across games (max 2 per match)")
+    ap.add_argument("--prefix", default=None,
+                    help="comma-separated series prefixes, e.g. KXEPL,KXLALIGA")
     args = ap.parse_args()
 
     client = KalshiClient(pace_seconds=0.1)
-    ticker = args.ticker or pick_smooth_ticker(client)
+    prefixes = tuple(p.strip() for p in args.prefix.split(",")) if args.prefix else None
+
+    if args.markets > 1:
+        tickers = pick_smooth_tickers(client, args.markets, prefixes)
+        if not tickers:
+            print("No active makeable markets right now.")
+            return 1
+        print(f"Paper-quoting {len(tickers)} markets for {args.minutes:.0f} min "
+              f"(cap +/-{MAX_POSITION} EACH, kill -${DAILY_LOSS_LIMIT:.0f} each): "
+              f"{', '.join(t[-26:] for t in tickers[:3])}...")
+        pilots = [Pilot(ticker=t) for t in tickers]
+        end = time.time() + args.minutes * 60
+        sweeps = 0
+        while time.time() < end and any(not p.halted for p in pilots):
+            t0 = time.time()
+            for p in pilots:
+                if p.halted:
+                    continue
+                try:
+                    poll_once(client, p)
+                except Exception as exc:
+                    print(f"  {p.ticker[-20:]} poll error: {str(exc)[:60]}")
+            sweeps += 1
+            if sweeps % 10 == 0:
+                pegged = sum(1 for p in pilots if p.max_abs_inv >= MAX_POSITION)
+                print(f"  {sweeps} sweeps, {sum(len(p.fills) for p in pilots)} fills, "
+                      f"{pegged}/{len(pilots)} pegged")
+            time.sleep(max(0.0, args.poll - (time.time() - t0)))
+        client.close()
+        report_multi(pilots)
+        return 0
+
+    ticker = args.ticker or pick_smooth_ticker(client, prefixes=prefixes)
     if not ticker:
         print("No active smooth benign market found. Pass --ticker.")
         return 1

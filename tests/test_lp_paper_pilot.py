@@ -221,3 +221,23 @@ def test_enumerate_candidates_skips_the_game_series_entirely():
         "ticker": "KXLALIGAGAME-X-HOME", "yes_bid_dollars": "0.53",
         "yes_ask_dollars": "0.55", "volume_24h_fp": "99999"}])
     assert enumerate_candidates(c, ("KXLALIGA",), min_volume=500.0) == []
+
+
+def test_pick_smooth_tickers_diversifies_across_games():
+    """N markets must mean ~N/max_per_event distinct MATCHES: the buckets of one game are the
+    same bet (a goal moves them together), so filling every slot from one match gives Nx the
+    exposure, not N independent samples."""
+    from core.maker.lp_pilot import pick_smooth_tickers
+
+    same_game = [f"KXEPLTOTAL-26SEP05MCICOV-{i}" for i in range(1, 7)]
+    other_game = [f"KXEPLTOTAL-26SEP05BRILEE-{i}" for i in range(1, 4)]
+    books = {tk: _book(0.52, 0.45) for tk in same_game + other_game}  # 3c spread, mid ~0.535
+    trades = [{"ticker": tk} for tk in same_game for _ in range(30)]
+    trades += [{"ticker": tk} for tk in other_game for _ in range(30)]
+    per_ticker = {tk: [{"created_time": _iso(1)}] * 40 for tk in same_game + other_game}
+    client = FakeClient(books, global_trades=trades, per_ticker_trades=per_ticker)
+
+    picked = pick_smooth_tickers(client, n=4, prefixes=("KXEPL",), max_per_event=2)
+    from collections import Counter
+    per_event = Counter(tk.split("-")[1] for tk in picked)
+    assert per_event and max(per_event.values()) <= 2, picked
