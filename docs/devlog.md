@@ -4,6 +4,36 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-09-05 — first live club-soccer paper runs: 4 real defects found, and inventory PEGS in every run
+
+Set out to run the first real-money club-soccer pilot on a live big-five match day (EPL 7 / La Liga 3 / Serie A 3 / Bundesliga 6 / Ligue 1 3 fixtures). Placed no real order — found four defects first, three of which would have corrupted the session's data, then got a cautionary paper result.
+
+**Defects found and fixed (all pushed):**
+
+1. **Kalshi renamed the REST price fields** (`068c47f`). Payloads now carry dollar STRINGS — `yes_bid_dollars` "0.9500", `volume_24h_fp` — not integer-cent `yes_bid`/`volume`. Code reading the old names gets `None` silently, so **every book looks unquoted**. My `live_check` reported "no game in play" while La Liga books were quoted in front of it. The bot itself was NOT affected (`best_bid_ask` already handled `yes_dollars`; selection ranks off the trades tape), so `lp_live --test-order` reporting "no market to test on" was *correct* — pre-game books are either competed to 1c or untraded.
+2. **The activity signal was crowded out by crypto** (`72cb3af`) — the big one. Selection gauged a market's activity by its share of the global `/markets/trades?limit=1000` tape, which the *whole exchange* shares. Measured: **KXBTC15M alone held 322/1000 slots**, crypto ~45%. Man City–Coventry SPREAD was doing **138 prints/5min and read as ~2** → failed the ≥15 floor → the maker idled on one of the most active books available. `/markets/trades` accepts a `ticker` filter, giving per-market prints immune to crowding (gotcha: per-ticker rows carry `created_time` with a **null `ts`** — reading `ts` yields 0 for everything, which produced a bogus "0 trades" table mid-session). Added `enumerate_candidates()` per-SERIES, since makeable books live on `KX<LEAGUE>TOTAL`/`SPREAD` while `KX<LEAGUE>GAME` is the 3-way result we never quote. **Very likely why soccer sat at 5–7 capture days** — it degrades capture, not just trading.
+3. **Paper pilot quoted market types the maker must never touch** (`847de79`). A live 10-market run picked **4 of 10** as `KXEPLBTTS`/`KXLALIGABTTS` (discrete-jump props, in `JUMPY`) and `KXLALIGAGAME`/`KXEPL1H` (directional match/half winners) — its tape path applied only the crypto exclusion and a spread band, no `is_mean_reverting`, no JUMPY filter. That invalidated the run's P&L, not just its market list. Also `lp_paper_pilot.ELIGIBLE_PREFIXES` had **drifted** and contained no club-soccer prefixes at all, so a default run could never find the markets the hypothesis is about.
+4. **No tool did capped AND multi-market** (`f95aaad`). v1 pools across markets but has no inventory cap (drifted to −355 net inventory live); v2 caps at ±20 but quoted one market. Added `--markets N` to v2 with per-market cap + kill switch, `max_per_event=2` (buckets of one match are the SAME bet — a goal moves them together), and `report_multi()` flagging any book that went **PEGGED** so inventory-constrained P&L is discounted rather than trusted.
+
+**Paper results (4 runs, all zero-money):**
+
+| run | markets | avg spread | markout @30s | net/fill @30s | inventory |
+|---|---|---|---|---|---|
+| 1 Hoffenheim TOTAL | 1 | 1.9c | −0.60c | +0.16c | pinned −20 |
+| 2 EPL 1H TOTAL (auto-select) | 1 | 8.9c | −1.08c | +0.98c | +20 → −20 |
+| 3 multi (contaminated: BTTS/GAME) | 10 | 7.2c | −0.24c | +1.56c | −355, uncapped |
+| 4 multi, CAPPED + clean | 5 | 3.0c | −0.65c | +0.97c | **5/5 PEGGED** |
+
+**The finding that matters: inventory pegged in every single run.** In healthy two-sided making, inventory oscillates around zero and rarely touches the cap; here every market ran to ±20, mostly within a minute. Club-soccer in-play flow is strongly one-sided over short windows — we get run over, and the cap is the only brake. So the positive P&L is inventory marks, not demonstrated spread capture. Per-fill economics ARE positive (capture ~1.5–4c half-spread comfortably exceeds toxicity), and the clean multi-market run showed markout *improving* with horizon (−0.87 → −0.64 → **+0.15c**), the mean-reversion signature the thesis predicts. But markout across runs ran −0.24c to −1.08c at 30s — consistently worse than the WC's −0.135c.
+
+**Also measured, and a headwind:** big-five in-play books are largely **competed to 1c** — only 2 of the top 22 by volume carried a 2c spread; Man City–Coventry trades 127k volume at 1c. The WC-era 2–15c retail spreads are largely gone in the top leagues, which makes `breakeven.py`'s capture-vs-toxicity question decisive rather than a formality.
+
+**One mitigation before over-reading run 4:** `lp_live` **skews** quotes to mean-revert inventory toward flat; `lp_pilot` only stops quoting a side at the cap. The live bot has an inventory tool the paper sim lacks, so run 4 likely overstates the pegging. It cannot overstate the one-sidedness of the flow.
+
+**Verdict: delay the real-money pilot.** Not on risk (capped at −$5) but on interpretability — and the account is at **$5.00 cash** (not the ~$8 recorded), the open position being a **short on Alcaraz winning the US Open** (−20.43, $14.71 exposure, expires 09-28), not the KXCHNSL our notes claimed. Next step: make the paper sim faithful to the live bot by adding inventory **skew**. If skew keeps inventory off the cap while net stays positive, that's the two-sided signature we've never observed. If it still pegs, the transfer thesis has a real problem worth knowing before funding it.
+
+---
+
 ## 2026-08-24 — Polymarket branch: built the read client + basket screen, then CLOSED the venue by evidence
 
 Derek wanted to branch out to Polymarket. Built the reusable read layer and one screen, measured it live, and — with a deep-research pass corroborating — concluded the whole venue is closed for us. The build is real and reusable; the trading conclusion is negative and that's the honest outcome.
