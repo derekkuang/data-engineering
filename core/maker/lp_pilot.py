@@ -31,6 +31,7 @@ import sys
 import time
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from core.maker.lp_gate import passes_gate
@@ -159,6 +160,81 @@ def is_mean_reverting(ticker: str) -> bool:
     return any(t in ticker for t in MEAN_REVERTING_TYPES)
 
 
+TRADE_WINDOW_MIN = 5.0  # minutes; the window the per-market activity rate is measured over
+
+
+def recent_trade_rate(
+    client: KalshiClient, ticker: str, window_min: float = TRADE_WINDOW_MIN
+) -> int:
+    """Trades on THIS market in the last `window_min` minutes, measured per-ticker.
+
+    WHY (measured 2026-09-05): the global ``/markets/trades?limit=1000`` tape is a FIXED-SIZE
+    window shared by the whole exchange, so a busy unrelated series crowds everything else out
+    of it — KXBTC15M alone held 322/1000 slots, crypto ~45%. A Bundesliga TOTAL book with 63
+    real prints/5min showed as ~5 on the tape and failed the >=15 gate, so the maker idled on a
+    genuinely makeable market (and `discover_markets` under-captured it — the likely mechanism
+    behind soccer sitting at 5-7 capture days). ``/markets/trades`` accepts a ``ticker`` filter,
+    which gives the market's OWN prints and is immune to what else is trading. Note the
+    per-ticker rows carry ``created_time`` (ISO) and a null ``ts`` — read created_time.
+    """
+    try:
+        d = client.get("/markets/trades", params={"ticker": ticker, "limit": 200})
+    except Exception:
+        return 0
+    cutoff = datetime.now(UTC) - timedelta(minutes=window_min)
+    n = 0
+    for t in d.get("trades", []):
+        raw = str(t.get("created_time") or "")
+        if not raw:
+            continue
+        try:
+            when = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if when >= cutoff:
+            n += 1
+    return n
+
+
+def enumerate_candidates(
+    client: KalshiClient, prefixes: tuple[str, ...], *, min_volume: float = 500.0,
+    cap: int = 40,
+) -> list[str]:
+    """Mean-reverting, two-sided, real-volume markets for `prefixes` — a tape-INDEPENDENT
+    candidate source used when the shared trades tape is crowded out (see `recent_trade_rate`).
+
+    Enumerates per SERIES, because the makeable markets live on their own series tickers:
+    ``KX<LEAGUE>GAME`` carries only the 3-way match result (directional, never quoted), while
+    the TOTAL/SPREAD books we make are ``KX<LEAGUE>TOTAL`` / ``KX<LEAGUE>SPREAD`` (+1H
+    variants). Paging /markets does NOT work here — it is not volume-ordered and soccer never
+    surfaces. Volume-ranked; prices are dollar STRINGS (yes_bid_dollars)."""
+    suffixes = ("TOTAL", "SPREAD", "1HTOTAL", "1HSPREAD")
+    rows: list[tuple[float, str]] = []
+    for pfx in prefixes:
+        for suf in suffixes:
+            try:
+                d = client.get("/events", params={
+                    "series_ticker": f"{pfx}{suf}", "status": "open",
+                    "with_nested_markets": "true", "limit": 40})
+            except Exception:
+                continue
+            for e in d.get("events", []):
+                for m in e.get("markets", []) or []:
+                    tk = str(m.get("ticker", ""))
+                    if not tk or any(x in tk for x in EXCLUDE) or any(j in tk for j in JUMPY):
+                        continue
+                    if not is_mean_reverting(tk):
+                        continue
+                    if m.get("yes_bid_dollars") is None or m.get("yes_ask_dollars") is None:
+                        continue
+                    vol = float(m.get("volume_24h_fp") or 0.0)
+                    if vol < min_volume:
+                        continue
+                    rows.append((vol, tk))
+    rows.sort(reverse=True)
+    return [tk for _, tk in rows[:cap]]
+
+
 def pick_smooth_ticker(
     client: KalshiClient,
     exclude: set[str] | None = None,
@@ -186,11 +262,19 @@ def pick_smooth_ticker(
             continue
         if any(tk.startswith(p) for p in pfx):
             counts[tk] += 1
-    for tk, recent in counts.most_common(25):
-        if not passes_gate(tk, recent):  # toxic type OR book too thin to make in
-            continue
+    # Candidates: the shared tape first (cheap, volume-ordered), then a tape-INDEPENDENT
+    # enumeration so a crowded tape can't hide makeable books (see `recent_trade_rate`).
+    ordered = [tk for tk, _ in counts.most_common(25)]
+    seen = set(ordered)
+    ordered += [tk for tk in enumerate_candidates(client, pfx) if tk not in seen and tk not in skip]
+    for tk in ordered:
         if not is_mean_reverting(tk):  # quote ONLY totals/spreads — everything else trends
             continue                   # and picks us off (overnight that's all that's active)
+        # Gate on the market's OWN recent prints, not its share of the shared tape: the tape
+        # undercounts anything competing with a high-frequency series and would idle us on a
+        # genuinely active book (measured: 63 prints/5min reading as ~5 on the tape).
+        if not passes_gate(tk, recent_trade_rate(client, tk)):
+            continue
         ba = best_bid_ask(client.get_market_orderbook(tk))
         if ba is None:
             continue

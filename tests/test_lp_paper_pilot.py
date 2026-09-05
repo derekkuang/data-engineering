@@ -125,3 +125,80 @@ def test_markout_rows_pools_across_markets():
     assert len(solo) == 1
     assert solo[0][:2] == (15, 1)
     assert solo[0][2:] == pytest.approx((0.5, 2.0))
+
+
+# --- per-ticker activity signal (2026-09-05) --------------------------------------
+# The shared /markets/trades tape is a fixed 1000-row window for the WHOLE exchange, so a
+# high-frequency series crowds others out of it (measured: KXBTC15M held 322/1000). These
+# guard the tape-independent replacement.
+
+class _FakeClient:
+    """Minimal KalshiClient stand-in for the activity/enumeration helpers."""
+
+    def __init__(self, trades=None, markets=None):
+        self._trades = trades or []
+        self._markets = markets or []
+
+    def get(self, path, params=None):
+        if path == "/markets/trades":
+            tk = (params or {}).get("ticker")
+            return {"trades": [t for t in self._trades if t.get("_tk") == tk]}
+        if path == "/events":
+            # enumerate_candidates queries one SERIES at a time; serve markets whose
+            # ticker starts with the requested series.
+            ser = (params or {}).get("series_ticker", "")
+            mk = [m for m in self._markets if str(m.get("ticker", "")).startswith(ser)]
+            return {"events": [{"markets": mk}]} if mk else {"events": []}
+        return {}
+
+
+def _iso(minutes_ago: float) -> str:
+    from datetime import UTC, datetime, timedelta
+    return (datetime.now(UTC) - timedelta(minutes=minutes_ago)).isoformat().replace("+00:00", "Z")
+
+
+def test_recent_trade_rate_counts_only_this_ticker_inside_window():
+    from core.maker.lp_pilot import recent_trade_rate
+    trades = (
+        [{"_tk": "A", "created_time": _iso(1)} for _ in range(20)]      # in window
+        + [{"_tk": "A", "created_time": _iso(30)} for _ in range(50)]   # too old
+        + [{"_tk": "B", "created_time": _iso(1)} for _ in range(99)]    # other market
+    )
+    c = _FakeClient(trades=trades)
+    assert recent_trade_rate(c, "A", window_min=5.0) == 20
+    assert recent_trade_rate(c, "B", window_min=5.0) == 99
+
+
+def test_recent_trade_rate_reads_created_time_not_null_ts():
+    """Per-ticker rows carry created_time and a NULL ts — reading ts yields 0 for everything."""
+    from core.maker.lp_pilot import recent_trade_rate
+    c = _FakeClient(trades=[{"_tk": "A", "ts": None, "created_time": _iso(1)} for _ in range(7)])
+    assert recent_trade_rate(c, "A", window_min=5.0) == 7
+
+
+def test_enumerate_candidates_is_meanrev_two_sided_and_volume_ranked():
+    from core.maker.lp_pilot import enumerate_candidates
+    mk = lambda tk, bid, vol: {  # noqa: E731
+        "ticker": tk, "yes_bid_dollars": bid, "yes_ask_dollars": "0.55",
+        "volume_24h_fp": str(vol),
+    }
+    c = _FakeClient(markets=[
+        mk("KXLALIGATOTAL-X-3", "0.53", 9000),    # keep (high vol)
+        mk("KXLALIGASPREAD-X-2", "0.53", 1000),   # keep
+        mk("KXLALIGAGAME-X-HOME", "0.53", 99999),  # drop: not mean-reverting
+        mk("KXLALIGATOTAL-Y-1", "0.53", 10),      # drop: under volume floor
+        {"ticker": "KXLALIGATOTAL-Z-1", "yes_bid_dollars": None,
+         "yes_ask_dollars": None, "volume_24h_fp": "9999"},  # drop: one-sided
+        mk("KXBTC15M-X", "0.53", 99999),          # drop: EXCLUDE crypto
+    ])
+    out = enumerate_candidates(c, ("KXLALIGA",), min_volume=500.0)
+    assert out == ["KXLALIGATOTAL-X-3", "KXLALIGASPREAD-X-2"]
+
+
+def test_enumerate_candidates_skips_the_game_series_entirely():
+    """KX<LEAGUE>GAME is the 3-way match result — directional, never quoted by the maker."""
+    from core.maker.lp_pilot import enumerate_candidates
+    c = _FakeClient(markets=[{
+        "ticker": "KXLALIGAGAME-X-HOME", "yes_bid_dollars": "0.53",
+        "yes_ask_dollars": "0.55", "volume_24h_fp": "99999"}])
+    assert enumerate_candidates(c, ("KXLALIGA",), min_volume=500.0) == []
