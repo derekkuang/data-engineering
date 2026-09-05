@@ -59,21 +59,40 @@ def test_best_bid_ask():
 
 def test_pick_benign_tickers_topn_and_spread_filter():
     # A busiest + makeable (3c), B next + makeable (2c), C busy but broken (40c spread -> excluded).
+    # Tickers must be MEAN-REVERTING (TOTAL/SPREAD) — GAME/BTTS are excluded by type, so
+    # this fixture uses TOTAL books to exercise the top-N + spread-band logic itself.
     books = {
-        "KXMLBGAME-A": _book(0.60, 0.37),  # spread 0.03 -> makeable
-        "KXMLBGAME-B": _book(0.70, 0.28),  # spread 0.02 -> makeable
-        "KXMLBGAME-C": _book(0.50, 0.10),  # spread 0.40 -> too wide
+        "KXMLBTOTAL-A": _book(0.60, 0.37),  # spread 0.03 -> makeable
+        "KXMLBTOTAL-B": _book(0.70, 0.28),  # spread 0.02 -> makeable
+        "KXMLBTOTAL-C": _book(0.50, 0.10),  # spread 0.40 -> too wide
     }
     trades = (
-        [{"ticker": "KXMLBGAME-A"}] * 5
-        + [{"ticker": "KXMLBGAME-B"}] * 3
-        + [{"ticker": "KXMLBGAME-C"}] * 4
+        [{"ticker": "KXMLBTOTAL-A"}] * 5
+        + [{"ticker": "KXMLBTOTAL-B"}] * 3
+        + [{"ticker": "KXMLBTOTAL-C"}] * 4
         + [{"ticker": "KXBTC-15M-X"}] * 9  # EXCLUDEd fast series -> never counted
     )
     client = FakeClient(books, global_trades=trades)
     picked = pick_benign_tickers(client, n=5)
-    assert picked == ["KXMLBGAME-A", "KXMLBGAME-B"]  # C dropped (wide), BTC excluded
-    assert pick_benign_ticker(client) == "KXMLBGAME-A"  # n=1 wrapper
+    assert picked == ["KXMLBTOTAL-A", "KXMLBTOTAL-B"]  # C dropped (wide), BTC excluded
+    assert pick_benign_ticker(client) == "KXMLBTOTAL-A"  # n=1 wrapper
+
+
+def test_pick_benign_tickers_rejects_game_and_jumpy_prop_types():
+    """Regression: the tape path once admitted directional GAME books and discrete-jump
+    props (BTTS/GOAL/CARD) — 4 of 10 live picks on 2026-09-05 were BTTS or GAME."""
+    books = {
+        "KXEPLGAME-X-HOME": _book(0.60, 0.37),      # directional 3-way result
+        "KXEPLBTTS-X-BTTS": _book(0.60, 0.37),      # discrete-jump prop
+        "KXEPLTOTAL-X-3": _book(0.60, 0.37),        # the only legitimate one
+    }
+    trades = (
+        [{"ticker": "KXEPLGAME-X-HOME"}] * 9
+        + [{"ticker": "KXEPLBTTS-X-BTTS"}] * 8
+        + [{"ticker": "KXEPLTOTAL-X-3"}] * 2
+    )
+    client = FakeClient(books, global_trades=trades)
+    assert pick_benign_tickers(client, prefixes=("KXEPL",), n=5) == ["KXEPLTOTAL-X-3"]
 
 
 def test_pick_benign_tickers_series_set_override():

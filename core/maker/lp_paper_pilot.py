@@ -43,7 +43,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from core.maker.lp_pilot import enumerate_candidates
+from core.maker.lp_pilot import JUMPY, enumerate_candidates, is_mean_reverting
 from ingestion.kalshi import KalshiClient
 
 POLL_SECONDS = 4.0
@@ -66,6 +66,22 @@ ELIGIBLE_PREFIXES = (
     "KXTENNIS",
     "KXBOXING",
     "KXGOLF",
+    # Club soccer — the post-WC primary hypothesis. This list had DIVERGED from
+    # lp_pilot.ELIGIBLE_PREFIXES and carried no club-soccer prefixes, so a default-universe
+    # run could never find the very markets the hypothesis is about (only an explicit
+    # --prefix worked). Kept in sync with lp_pilot deliberately.
+    "KXMLS",
+    "KXLIGAMX",
+    "KXBRASILEIRO",
+    "KXEPL",
+    "KXLALIGA",
+    "KXSERIEA",
+    "KXBUNDESLIGA",
+    "KXLIGUE1",
+    "KXUCL",
+    "KXUEL",
+    "KXEREDIVISIE",
+    "KXEFLCHAMPIONSHIP",
 )
 EXCLUDE = ("15M", "PERP", "KXBTC", "KXETH", "KXSOL", "KXHYPE", "KXXRP", "KXDOGE")
 
@@ -122,6 +138,14 @@ def pick_benign_tickers(client: KalshiClient, prefixes: tuple[str, ...] | None =
             continue
         matched = (tk.split("-")[0] in series_set) if series_set is not None \
             else any(tk.startswith(p) for p in pfx)
+        # The tape path historically applied only EXCLUDE (crypto) + a spread band, so it
+        # admitted market types the maker must NEVER quote: BTTS/GOAL/CARD discrete-jump props
+        # and the directional GAME / 1H-winner books. (Measured 2026-09-05: 4 of 10 picks were
+        # BTTS or GAME.) Apply the same allowlist enumerate_candidates uses. Politics
+        # (series_set) is exempt — it has no TOTAL/SPREAD analogue.
+        if matched and series_set is None:
+            if not is_mean_reverting(tk) or any(j in tk for j in JUMPY):
+                matched = False
         if matched:
             counts[tk] += 1
     # The shared tape is a fixed 1000-row exchange-wide window, so a high-frequency series
