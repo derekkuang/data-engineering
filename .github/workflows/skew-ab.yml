@@ -1,0 +1,85 @@
+name: skew A/B (two-sided capture check)
+
+# Autonomous ZERO-MONEY controlled experiment: does the maker do genuine TWO-SIDED spread
+# capture, or just accumulate a directional bet the inventory cap happens to bound?
+#
+# One book+trades fetch per ticker per sweep is handed to BOTH arms, so they see identical
+# markets, prints and timestamps — the only difference is inventory skew (lp_live's rule vs
+# none). That makes this a controlled A/B rather than a cross-session comparison, which would
+# confound skew with scoreline/volatility.
+#
+# First run (2026-09-06, 3 markets / 9 min): SKEW ON pegged 0/3, mean |inv| 1.3, net
+# +1.95c/fill @60s; SKEW OFF pegged 3/3, mean |inv| 10.0, net -0.01c @60s. One session is a
+# promising read, NOT a fact — this schedule exists to see whether it reproduces across
+# sessions and scorelines before any real money is committed.
+#
+# All PUBLIC market data: no auth, no trading key, no capital at risk. Fill rate is an
+# optimistic upper bound (queue ignored); markout and the inventory path are the trustworthy
+# outputs. Results append to docs/skew_ab_findings.md, committed with [skip ci].
+
+on:
+  schedule:
+    # European club match windows (the wide in-play books the hypothesis is about).
+    - cron: "30 14 * * 6,0"   # 14:30 UTC Sat/Sun — afternoon slate
+    - cron: "30 17 * * 6,0"   # 17:30 UTC Sat/Sun — evening slate
+    - cron: "0 19 * * 2,3"    # 19:00 UTC Tue/Wed — UCL/UEL midweek
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "A/B minutes"
+        default: "25"
+      markets:
+        description: "markets to quote (diversified, max 2 per match)"
+        default: "6"
+
+# Never run two A/Bs at once (they append to the same findings file).
+concurrency:
+  group: skew-ab
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # commit the findings file back to the repo
+
+jobs:
+  skew-ab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # Public market-data endpoint — NO auth/key needed (reads book + trade tape only).
+      KALSHI_API_BASE: https://external-api.kalshi.com/trade-api/v2
+      MINUTES: ${{ inputs.minutes || '25' }}
+      MARKETS: ${{ inputs.markets || '6' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (locked)
+        run: uv sync --frozen
+
+      - name: Skew A/B on the live club-soccer board (zero capital)
+        run: |
+          {
+            echo ""
+            echo "## $(date -u +'%Y-%m-%d %H:%M UTC') — skew A/B (soccer)"
+            echo '```'
+          } >> docs/skew_ab_findings.md
+          # `|| true`: a window with no live/makeable soccer exits non-zero — still record it,
+          # since "no makeable book at this hour" is itself a datum about the board.
+          uv run python -m strategies.soccer_mm.skew_ab \
+            --minutes "$MINUTES" --markets "$MARKETS" \
+            2>&1 | tee -a docs/skew_ab_findings.md || true
+          echo '```' >> docs/skew_ab_findings.md
+
+      - name: Commit findings
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/skew_ab_findings.md
+          # [skip ci] so the findings commit doesn't re-trigger the dbt/pytest build.
+          git diff --cached --quiet || git commit -m "skew A/B findings $(date -u +%F-%H%M) [skip ci]"
+          git push
