@@ -4,6 +4,30 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-09-06 — SKEW A/B: yesterday's pegging was a simulation artifact; first two-sided capture observed
+
+Yesterday every paper run pegged inventory at the cap, which made every P&L an inventory mark rather than spread capture. Root cause found: `lp_live` **skews** quotes to mean-revert inventory to flat (`SKEW_PER_CONTRACT * inv` — push the ACCUMULATING side off the touch, keep the REDUCING side there), while `lp_pilot` had **no skew at all** — it merely stopped quoting a side at the hard cap. The paper sim was therefore *strictly more aggressive than the live bot*. Added skew to `lp_pilot` mirroring live exactly (`2d393ef`), with a test asserting the two constants can never drift apart again.
+
+**Controlled A/B (`scratchpad/skew_ab.py`)** — one book+trades fetch per ticker per sweep handed to BOTH arms, so same markets, same prints, same timestamps; the only difference is skew. 3 markets (Ligue 1 TOTAL + 2 Bundesliga SPREAD), 90 sweeps, 9 min:
+
+| | SKEW ON (=lp_live) | SKEW OFF (=yesterday) |
+|---|---|---|
+| PEGGED | **0/3** | **3/3** |
+| mean abs inv | **1.3** | 10.0 |
+| mean max abs inv | 11.0 | 20.0 (cap) |
+| fills | 144 | 266 |
+| net/fill @30s | **+2.02c** | +0.74c |
+| net/fill @60s | **+1.95c** | **-0.01c** |
+| pooled P&L | **+$2.46** | +$1.41 |
+
+**Findings.** (1) Skew eliminates pegging entirely and holds inventory at a mean of **1.3 contracts** — genuine two-sided capture, observed for the first time on club soccer. (2) Skew is the difference between a positive strategy and a wash: without it net decays to **-0.01c at 60s**; with it, +1.95c — achieved on *half* the fills, so it is fill QUALITY not volume. (3) Mechanism is visible in markout: short-horizon markout is WORSE with skew (-1.38c vs -0.70c @15s, since a skewed fill happens when price moves to your leaned-away quote, i.e. in trending conditions) but you fill far cheaper, so net wins; by 60s skew's markout is also better (-1.86c vs -2.00c).
+
+**Caveats.** 3 markets / 9 min / one session (gates passed only 3 of 6 requested); fill rate still an upper bound; markout -1.65c@30s remains far worse than the WC's -0.135c — club flow IS more toxic, and the edge here comes from wide spreads + disciplined inventory, not benign flow. Needs replication across sessions and scorelines.
+
+**Effect on the pilot decision:** flips from "delay" toward "worth funding once replicated". Yesterday's blocker was that two-sided capture had never been observed; it now has, under the live bot's real rule. Unchanged gates: flow-axis CI needs more capture days, realized capture needs real fills, account is at $5 cash.
+
+---
+
 ## 2026-09-05 — first live club-soccer paper runs: 4 real defects found, and inventory PEGS in every run
 
 Set out to run the first real-money club-soccer pilot on a live big-five match day (EPL 7 / La Liga 3 / Serie A 3 / Bundesliga 6 / Ligue 1 3 fixtures). Placed no real order — found four defects first, three of which would have corrupted the session's data, then got a cautionary paper result.
