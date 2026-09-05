@@ -241,3 +241,48 @@ def test_pick_smooth_tickers_diversifies_across_games():
     from collections import Counter
     per_event = Counter(tk.split("-")[1] for tk in picked)
     assert per_event and max(per_event.values()) <= 2, picked
+
+
+def test_paper_skew_matches_lp_live_semantics():
+    """Paper skew must mirror lp_live: the ACCUMULATING side is pushed off the touch by
+    SKEW_PER_CONTRACT*|inv|; the REDUCING side stays at the touch. Without this the paper sim
+    is strictly more aggressive than the live bot (it quoted the losing side at the touch
+    until the hard cap) — the reason every 2026-09-05 run pegged."""
+    from core.maker import lp_live
+    from core.maker.lp_pilot import SKEW_PER_CONTRACT, Pilot
+    from core.maker.lp_pilot import poll_once as v2_poll
+
+    assert SKEW_PER_CONTRACT == lp_live.SKEW_PER_CONTRACT  # constants must not drift
+
+    tk = "KXEPLTOTAL-X-3"
+    # book: bid 0.60 / ask 0.63. Long 5 -> skew=0.05 -> bid pushed to 0.55, ask stays 0.63.
+    book = {tk: _book(0.60, 0.37)}
+
+    # A print at 0.60 would have filled the un-skewed bid; while LONG it must NOT fill.
+    client = FakeClient(book, per_ticker_trades={
+        tk: [{"trade_id": "a", "yes_price_dollars": 0.60}]})
+    p = Pilot(ticker=tk, inv=5)
+    v2_poll(client, p)
+    assert p.fills == [] and p.inv == 5, "skewed bid should not fill at the old touch"
+
+    # A print at/through the SKEWED bid (0.55) does fill, at the skewed price.
+    client = FakeClient(book, per_ticker_trades={
+        tk: [{"trade_id": "b", "yes_price_dollars": 0.55}]})
+    p = Pilot(ticker=tk, inv=5)
+    v2_poll(client, p)
+    assert [(f.side, f.price) for f in p.fills] == [(+1, 0.55)]
+
+    # The REDUCING side (ask, while long) stays at the touch and still fills.
+    client = FakeClient(book, per_ticker_trades={
+        tk: [{"trade_id": "c", "yes_price_dollars": 0.63}]})
+    p = Pilot(ticker=tk, inv=5)
+    v2_poll(client, p)
+    assert [(f.side, f.price) for f in p.fills] == [(-1, 0.63)]
+    assert p.inv == 4  # mean-reverting toward flat
+
+    # Flat inventory -> no skew -> identical to the old behaviour.
+    client = FakeClient(book, per_ticker_trades={
+        tk: [{"trade_id": "d", "yes_price_dollars": 0.60}]})
+    p = Pilot(ticker=tk, inv=0)
+    v2_poll(client, p)
+    assert [(f.side, f.price) for f in p.fills] == [(+1, 0.60)]

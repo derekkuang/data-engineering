@@ -48,6 +48,12 @@ DAILY_LOSS_LIMIT = 10.0  # dollars; kill switch per-market AND session (was 5; 2
 # WNBA 1H-winners / MLB games marching to a favorite). Capping at 0.92 makes us exit +
 # flatten before the most one-sided last few cents. Lower stays 0.05 (longshots are cheap).
 MIN_MID, MAX_MID = 0.05, 0.92
+# Inventory skew — MUST match lp_live.SKEW_PER_CONTRACT. Dollars to push the ACCUMULATING
+# side's quote off the touch per contract held, so inventory mean-reverts to flat. The paper
+# sim lacked this while the live bot had it, making paper strictly more aggressive than live
+# (it quoted the losing side at the touch until the hard cap). Set 0 to reproduce the old
+# no-skew behaviour.
+SKEW_PER_CONTRACT = 0.01
 # COARSE pre-filter only — the universe of sports whose books we might quote. This is NOT the
 # authority on WHAT is safe to make: several prefixes here (KXMLB/KXWNBA/KXITF...) were MEASURED
 # toxic. The authoritative, fail-CLOSED gate is the per-family verdict in quotable_families.json,
@@ -420,7 +426,8 @@ def pnl(p: Pilot, mid: float) -> float:
     return p.cash + p.inv * mid
 
 
-def poll_once(client: KalshiClient, p: Pilot) -> None:
+def poll_once(client: KalshiClient, p: Pilot,
+              skew_per_contract: float = SKEW_PER_CONTRACT) -> None:
     now = time.time()
     ba = best_bid_ask(client.get_market_orderbook(p.ticker))
     if ba is None:
@@ -446,14 +453,23 @@ def poll_once(client: KalshiClient, p: Pilot) -> None:
         px = _f(t.get("yes_price_dollars"))
         if px is None:
             continue
-        if quote_bid and px <= bid and p.inv < MAX_POSITION:
-            p.fills.append(Fill(now, +1, bid, mid))
+        # INVENTORY SKEW — mirrors lp_live exactly (SKEW_PER_CONTRACT * inv): push the
+        # ACCUMULATING side off the touch in proportion to inventory so it mean-reverts to
+        # flat, while the REDUCING side stays at the touch to keep capturing back to flat.
+        # Recomputed per trade because inventory moves within a poll. Without this the paper
+        # sim was STRICTLY more aggressive than the live bot — it kept quoting the losing side
+        # at the touch until the hard cap, which is why every 2026-09-05 run pegged.
+        skew = skew_per_contract * p.inv  # >0 when long, <0 when short
+        bid_px = round(max(0.01, min(0.99, bid - max(0.0, skew))), 2)
+        ask_px = round(max(0.01, min(0.99, ask - min(0.0, skew))), 2)
+        if quote_bid and px <= bid_px and p.inv < MAX_POSITION:
+            p.fills.append(Fill(now, +1, bid_px, mid))
             p.inv += 1
-            p.cash -= bid
-        elif quote_ask and px >= ask and p.inv > -MAX_POSITION:
-            p.fills.append(Fill(now, -1, ask, mid))
+            p.cash -= bid_px
+        elif quote_ask and px >= ask_px and p.inv > -MAX_POSITION:
+            p.fills.append(Fill(now, -1, ask_px, mid))
             p.inv -= 1
-            p.cash += ask
+            p.cash += ask_px
 
     p.max_abs_inv = max(p.max_abs_inv, abs(p.inv))
     p.min_pnl = min(p.min_pnl, pnl(p, mid))
