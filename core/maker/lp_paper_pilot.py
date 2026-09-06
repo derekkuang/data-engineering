@@ -43,7 +43,13 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from core.maker.lp_pilot import JUMPY, enumerate_candidates, is_mean_reverting
+from core.maker.lp_gate import passes_gate
+from core.maker.lp_pilot import (
+    JUMPY,
+    enumerate_candidates,
+    is_mean_reverting,
+    recent_trade_rate,
+)
 from ingestion.kalshi import KalshiClient
 
 POLL_SECONDS = 4.0
@@ -167,6 +173,14 @@ def pick_benign_tickers(client: KalshiClient, prefixes: tuple[str, ...] | None =
         parts = tk.split("-")
         event = parts[1] if len(parts) > 1 else tk
         if per_event[event] >= max_per_event:
+            continue
+        # ACTIVITY FLOOR — the same gate the live maker uses. Without it this picked DEAD
+        # books: 2026-09-06 07:22 UTC it quoted a post-game MLS total (14.1c spread, 13 fills
+        # in 30 min, ALL sells, markout EXACTLY 0.00c at every horizon = a frozen mid) and
+        # recorded a fictional "+7.00c/fill". A wide spread on a book nobody trades is the
+        # "wide != rich" trap, and recording it pollutes the autonomous findings stream.
+        # Measured per-ticker, not off the shared tape (which crypto floods).
+        if series_set is None and not passes_gate(tk, recent_trade_rate(client, tk)):
             continue
         book = client.get_market_orderbook(tk)
         ba = best_bid_ask(book)

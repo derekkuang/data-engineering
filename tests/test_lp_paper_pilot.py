@@ -22,6 +22,13 @@ from core.maker.lp_paper_pilot import (
 )
 
 
+def _active(*tickers: str) -> dict:
+    """Per-ticker tapes that clear the recent-trade floor (>=15 prints in the window)."""
+    from datetime import UTC, datetime, timedelta
+    when = (datetime.now(UTC) - timedelta(seconds=30)).isoformat().replace("+00:00", "Z")
+    return {tk: [{"created_time": when} for _ in range(20)] for tk in tickers}
+
+
 def _book(yes_bid: float, no_bid: float) -> dict:
     """A minimal orderbook: best yes bid = yes_bid, best yes ask = 1 - no_bid."""
     return {"yes_dollars": [[yes_bid, 100]], "no_dollars": [[no_bid, 100]]}
@@ -72,7 +79,9 @@ def test_pick_benign_tickers_topn_and_spread_filter():
         + [{"ticker": "KXMLBTOTAL-C"}] * 4
         + [{"ticker": "KXBTC-15M-X"}] * 9  # EXCLUDEd fast series -> never counted
     )
-    client = FakeClient(books, global_trades=trades)
+    client = FakeClient(books, global_trades=trades,
+                        per_ticker_trades=_active("KXMLBTOTAL-A", "KXMLBTOTAL-B",
+                                                  "KXMLBTOTAL-C"))
     picked = pick_benign_tickers(client, n=5)
     assert picked == ["KXMLBTOTAL-A", "KXMLBTOTAL-B"]  # C dropped (wide), BTC excluded
     assert pick_benign_ticker(client) == "KXMLBTOTAL-A"  # n=1 wrapper
@@ -91,8 +100,21 @@ def test_pick_benign_tickers_rejects_game_and_jumpy_prop_types():
         + [{"ticker": "KXEPLBTTS-X-BTTS"}] * 8
         + [{"ticker": "KXEPLTOTAL-X-3"}] * 2
     )
-    client = FakeClient(books, global_trades=trades)
+    client = FakeClient(books, global_trades=trades,
+                        per_ticker_trades=_active("KXEPLGAME-X-HOME", "KXEPLBTTS-X-BTTS",
+                                                  "KXEPLTOTAL-X-3"))
     assert pick_benign_tickers(client, prefixes=("KXEPL",), n=5) == ["KXEPLTOTAL-X-3"]
+
+
+def test_pick_benign_tickers_rejects_dead_books_with_no_recent_trades():
+    """Regression: 2026-09-06 the autonomous stream quoted a POST-GAME MLS total (14.1c
+    spread, 13 fills/30min, markout exactly 0.00c = frozen mid) and recorded a fictional
+    +7.00c/fill. A wide spread on a book nobody trades is the 'wide != rich' trap."""
+    books = {"KXMLSTOTAL-DEAD-4": _book(0.50, 0.36)}  # 14c spread, makeable-looking
+    trades = [{"ticker": "KXMLSTOTAL-DEAD-4"}] * 30   # busy on the STALE global tape...
+    # ...but NO recent prints per-ticker -> dead book
+    client = FakeClient(books, global_trades=trades, per_ticker_trades={})
+    assert pick_benign_tickers(client, prefixes=("KXMLS",), n=5) == []
 
 
 def test_pick_benign_tickers_series_set_override():
