@@ -55,3 +55,52 @@ Read: two-sided capture iff SKEW ON keeps PEGGED at 0 and mean|inv| near flat
 WHILE net/fill stays positive at 60s. Fill counts are an UPPER bound (queue 
 ignored); markout is queue-independent and is the trustworthy toxicity signal.
 ```
+
+## 2026-09-06 17:10 UTC — skew A/B (soccer)
+```
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+SKEW A/B on 4 markets for 25 min (skew 0.01 vs 0.0), identical inputs to both arms:
+   KXLALIGATOTAL-26SEP06ALAOSA-4
+   KXLALIGASPREAD-26SEP06ALAOSA-ALA2
+   KXSERIEATOTAL-26SEP06BFCSAS-4
+   KXSERIEATOTAL-26SEP06BFCSAS-3
+  20 sweeps | pegged: skew 2/4, flat 3/4
+  40 sweeps | pegged: skew 2/4, flat 3/4
+  60 sweeps | pegged: skew 2/4, flat 3/4
+  80 sweeps | pegged: skew 2/4, flat 3/4
+  100 sweeps | pegged: skew 2/4, flat 3/4
+  120 sweeps | pegged: skew 2/4, flat 3/4
+  140 sweeps | pegged: skew 2/4, flat 4/4
+  160 sweeps | pegged: skew 2/4, flat 4/4
+  180 sweeps | pegged: skew 2/4, flat 4/4
+  200 sweeps | pegged: skew 2/4, flat 4/4
+  220 sweeps | pegged: skew 2/4, flat 4/4
+  240 sweeps | pegged: skew 2/4, flat 4/4
+
+==============================================================================
+SKEW A/B — 4 markets, 250 sweeps, identical inputs
+==============================================================================
+
+--- SKEW ON (0.01/contract) = what lp_live does ---
+  fills 319   pooled P&L $+17.19   PEGGED 2/4   mean|inv| 5.2   mean max|inv| 17.8 (cap 20)
+     15s  n=  304  markout -0.65c   net +3.98c
+     30s  n=  298  markout -0.42c   net +4.29c
+     60s  n=  291  markout +0.85c   net +5.51c
+    per-market max|inv|: 6SEP06ALAOSA-4=20*, P06ALAOSA-ALA2=20*, 6SEP06BFCSAS-3=18, 6SEP06BFCSAS-4=13
+
+--- SKEW OFF (0.0) = no inventory lean ---
+  fills 491   pooled P&L $+14.94   PEGGED 4/4   mean|inv| 16.2   mean max|inv| 20.0 (cap 20)
+     15s  n=  469  markout -0.61c   net +1.03c
+     30s  n=  460  markout -0.53c   net +1.13c
+     60s  n=  452  markout +1.04c   net +2.58c
+    per-market max|inv|: 6SEP06ALAOSA-4=20*, P06ALAOSA-ALA2=20*, 6SEP06BFCSAS-4=20*, 6SEP06BFCSAS-3=20*
+
+Read: two-sided capture iff SKEW ON keeps PEGGED at 0 and mean|inv| near flat 
+WHILE net/fill stays positive at 60s. Fill counts are an UPPER bound (queue 
+ignored); markout is queue-independent and is the trustworthy toxicity signal.
+```
