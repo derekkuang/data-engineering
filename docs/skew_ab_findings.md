@@ -104,3 +104,47 @@ Read: two-sided capture iff SKEW ON keeps PEGGED at 0 and mean|inv| near flat
 WHILE net/fill stays positive at 60s. Fill counts are an UPPER bound (queue 
 ignored); markout is queue-independent and is the trustworthy toxicity signal.
 ```
+
+## 2026-09-06 19:20 UTC — skew A/B (soccer)
+```
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+SKEW A/B on 2 markets for 25 min (skew 0.01 vs 0.0), identical inputs to both arms:
+   KXLALIGATOTAL-26SEP06ESPSEV-2
+   KXLALIGA1HTOTAL-26SEP06ESPSEV-1
+  20 sweeps | pegged: skew 1/2, flat 2/2
+  40 sweeps | pegged: skew 1/2, flat 2/2
+  60 sweeps | pegged: skew 1/2, flat 2/2
+  80 sweeps | pegged: skew 1/2, flat 2/2
+  100 sweeps | pegged: skew 1/2, flat 2/2
+  120 sweeps | pegged: skew 1/2, flat 2/2
+  140 sweeps | pegged: skew 1/2, flat 2/2
+  160 sweeps | pegged: skew 1/2, flat 2/2
+  180 sweeps | pegged: skew 1/2, flat 2/2
+  200 sweeps | pegged: skew 1/2, flat 2/2
+  220 sweeps | pegged: skew 1/2, flat 2/2
+  240 sweeps | pegged: skew 1/2, flat 2/2
+
+==============================================================================
+SKEW A/B — 2 markets, 250 sweeps, identical inputs
+==============================================================================
+
+--- SKEW ON (0.01/contract) = what lp_live does ---
+  fills 195   pooled P&L $+8.23   PEGGED 1/2   mean|inv| 0.5   mean max|inv| 18.5 (cap 20)
+     15s  n=  194  markout -3.09c   net +2.08c
+     30s  n=  188  markout -2.75c   net +2.57c
+     60s  n=  187  markout -0.75c   net +4.60c
+    per-market max|inv|: 6SEP06ESPSEV-2=20*, 6SEP06ESPSEV-1=17
+
+--- SKEW OFF (0.0) = no inventory lean ---
+  fills 277   pooled P&L $+13.07   PEGGED 2/2   mean|inv| 19.5   mean max|inv| 20.0 (cap 20)
+     15s  n=  275  markout -2.97c   net +0.38c
+     30s  n=  267  markout -2.57c   net +0.86c
+     60s  n=  265  markout -1.40c   net +2.05c
+    per-market max|inv|: 6SEP06ESPSEV-2=20*, 6SEP06ESPSEV-1=20*
+
+Read: two-sided capture iff SKEW ON keeps PEGGED at 0 and mean|inv| near flat 
+WHILE net/fill stays positive at 60s. Fill counts are an UPPER bound (queue 
+ignored); markout is queue-independent and is the trustworthy toxicity signal.
+```
