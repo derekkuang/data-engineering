@@ -20,6 +20,12 @@ on:
     - cron: "30 11 * * *"  # Euro early slate (EPL lunch, Bundesliga/EPL 13:30-14:00) -> SOCCER, 180m
     - cron: "30 14 * * *"  # Euro mid slate (EPL/La Liga/Ligue 1 15:00-16:30)         -> SOCCER, 180m
     - cron: "30 17 * * *"  # Euro evening slate (Serie A 18:45, La Liga 19:30, MNF)   -> SOCCER, 180m
+    # Late-kickoff TAIL. The 17:30 window ends 20:30 UTC, but the 21:00 CEST slot (19:00 UTC)
+    # — UCL/UEL midweek, plus late La Liga/Serie A — runs to ~20:50. We were losing the final
+    # ~20 min: exactly where a total CONVERGES and where late goals cause the biggest jumps,
+    # i.e. the pick-off window the toxicity measurement most needs. 90m covers the tail and
+    # idles cheaply when nothing is live.
+    - cron: "30 20 * * *"  # late-kickoff tail (UCL/UEL 21:00 CEST + late Iberia)     -> SOCCER, 90m
     - cron: "0 19 * * *"   # ~afternoon Europe / midday US        -> --wide (controls + Euro board)
     - cron: "0 23 * * *"   # ~evening Europe / afternoon US        -> --wide (controls + US board)
     - cron: "0 0 * * *"    # ~prime Americas club-soccer kickoff   -> SOCCER-only capture
@@ -86,6 +92,7 @@ jobs:
           case "${{ github.event.schedule }}" in
             "0 0 * * *"|"0 2 * * *") PREFIX="$SOCCER" ;;
             "30 11 * * *"|"30 14 * * *"|"30 17 * * *") PREFIX="$SOCCER"; MINUTES=180 ;;
+            "30 20 * * *") PREFIX="$SOCCER"; MINUTES=90 ;;   # late-kickoff tail
           esac
           if [ -n "$PREFIX" ]; then
             uv run python -m core.capture.ws_features --minutes "$MINUTES" --wide --prefix "$PREFIX"

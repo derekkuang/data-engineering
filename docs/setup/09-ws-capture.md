@@ -24,6 +24,11 @@ lands it to S3. Two tiers (see the cron comments in the workflow for the authori
 - **Big-five Europe, SOCCER-only, 180 min**: 11:30 / 14:30 / 17:30 UTC — a continuous
   11:30–20:30 UTC blanket over the EPL/La Liga/Serie A/Bundesliga/Ligue 1 match day
   (added 2026-08-24 at season start; idles cheaply on non-match days).
+- **Late-kickoff tail, SOCCER-only, 90 min**: 20:30 UTC (added 2026-09-09). The 17:30 window
+  ends at 20:30, but the 21:00 CEST slot (19:00 UTC) — **UCL/UEL midweek** plus late
+  La Liga/Serie A — runs to ~20:50, so we were losing the final ~20 minutes of those games:
+  exactly where a total CONVERGES and where late goals cause the biggest jumps, i.e. the
+  pick-off window the toxicity measurement most needs.
 - **Wide (controls) + Americas soccer, 90 min**: 19:00 / 23:00 UTC `--wide` (keeps the
   known-toxic ITF/MATCH/GAME markout controls), 00:00 / 02:00 UTC SOCCER-only (Americas).
 
