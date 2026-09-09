@@ -43,7 +43,9 @@ permissions:
 jobs:
   skew-ab:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # WAIT (120) + MINUTES (25) + install ~= 150 min worst case. A 45-min cap would kill the
+    # job mid-wait and we would lose the very slate the wait exists to catch.
+    timeout-minutes: 180
     env:
       # Public market-data endpoint — NO auth/key needed (reads book + trade tape only).
       KALSHI_API_BASE: https://external-api.kalshi.com/trade-api/v2
@@ -70,8 +72,10 @@ jobs:
           } >> docs/skew_ab_findings.md
           # `|| true`: a window with no live/makeable soccer exits non-zero — still record it,
           # since "no makeable book at this hour" is itself a datum about the board.
+          # --wait-minutes: GitHub cron is best-effort (measured 1h47m-4h39m late), so poll
+          # for kickoff rather than recording "no makeable markets" for a live slate.
           uv run python -m strategies.soccer_mm.skew_ab \
-            --minutes "$MINUTES" --markets "$MARKETS" \
+            --minutes "$MINUTES" --markets "$MARKETS" --wait-minutes 120 \
             2>&1 | tee -a docs/skew_ab_findings.md || true
           echo '```' >> docs/skew_ab_findings.md
 

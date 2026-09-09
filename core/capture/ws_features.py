@@ -45,6 +45,7 @@ from ingestion.kalshi_ws import KalshiWS, LocalBook
 WINDOW_S = 60.0  # trailing window for flow + volatility features
 FEATURE_LOG = "data/ws_features.csv"
 NEAR_TOUCH = 0.03  # dollars; "near touch" = within 3c of the best price on a side
+WAIT_POLL_S = 60.0  # seconds between kickoff polls while --wait-minutes is counting down
 FEATURE_COLS = [
     "ts_utc", "market", "bid", "ask", "mid", "spread_c",
     "imbalance", "yes_depth", "no_depth", "depth_near", "n_levels",
@@ -160,6 +161,7 @@ def _append(path: str, rows: list[list[Any]]) -> None:
 async def run(
     *, tickers: list[str] | None, prefixes: tuple[str, ...] | None, use_btc: bool,
     minutes: float, cap: int, snapshot_s: float, refresh_s: float, wide: bool = False,
+    wait_minutes: float = 0.0,
 ) -> int:
     client = KalshiClient(pace_seconds=0.1)
     fixed = tickers is not None or use_btc
@@ -171,6 +173,23 @@ async def run(
         current = [m["ticker"] for m in mkts[:cap]]
     else:
         current = discover_markets(client, prefixes, cap, wide=wide)
+        # WAIT FOR THE GAMES rather than trusting the clock. GitHub's `schedule` is
+        # best-effort: measured 2026-09-08 our crons fired 1h47m-4h39m LATE (the 11:30 UTC
+        # window started 15:13), so a fixed-time window systematically missed the early
+        # European slate and captured post-game dead books instead. Shifting the cron would
+        # compensate a RANDOM delay with a FIXED offset — wrong fix. Instead the job polls
+        # until a real game is live, so whenever the runner actually starts, capture begins
+        # at kickoff. Costs nothing on a public repo and needs no new infrastructure.
+        if not current and wait_minutes > 0:
+            deadline = time.time() + wait_minutes * 60
+            print(f"no live markets yet — waiting up to {wait_minutes:.0f} min for kickoff "
+                  f"(polling every {WAIT_POLL_S:.0f}s)...")
+            while not current and time.time() < deadline:
+                await asyncio.sleep(WAIT_POLL_S)
+                current = discover_markets(client, prefixes, cap, wide=wide)
+                if current:
+                    waited = wait_minutes - (deadline - time.time()) / 60.0
+                    print(f"  live after {waited:.0f} min — {len(current)} market(s), capturing.")
     if not current:
         print("no active eligible markets right now — idle. (try --prefix off-hours, or --btc)")
         client.close()
@@ -238,6 +257,10 @@ def main() -> int:
     ap.add_argument("--cap", type=int, default=40)
     ap.add_argument("--snapshot", type=float, default=5.0, help="seconds between feature rows")
     ap.add_argument("--refresh", type=float, default=90.0, help="seconds between re-discovery")
+    ap.add_argument("--wait-minutes", type=float, default=0.0,
+                    help="poll up to N min for a live game before capturing. GitHub cron is "
+                         "best-effort (measured 1h47m-4h39m late), so wait for kickoff rather "
+                         "than trusting the clock.")
     ap.add_argument("--wide", action="store_true",
                     help="MEASUREMENT universe: activity floor only, keeping known-toxic "
                          "families (ITF, MATCH/GAME) as labeled markout controls")
@@ -248,6 +271,7 @@ def main() -> int:
     return asyncio.run(run(
         tickers=tickers, prefixes=prefixes, use_btc=args.btc, minutes=args.minutes,
         cap=args.cap, snapshot_s=args.snapshot, refresh_s=args.refresh, wide=args.wide,
+        wait_minutes=args.wait_minutes,
     ))
 
 

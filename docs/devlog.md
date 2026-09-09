@@ -4,6 +4,34 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-09-10 — workflow audit: GitHub cron runs 2-4.5h LATE; capture now waits for kickoff
+
+Audited every scheduled thing after 4 A/B sessions banked. Two real problems.
+
+**Problem 1 — GitHub `schedule` is best-effort, and it shows.** Scheduled vs actual on 09-08:
+
+| cron (UTC) | actual | late by |
+|---|---|---|
+| 11:30 | 15:13 | 3h43m |
+| 14:30 | 17:59 | 3h29m |
+| 17:30 | 20:00 | 2h30m |
+| 19:00 | 21:29 | 2h29m |
+| 02:00 | 06:39 | 4h39m |
+
+So the carefully-tuned "continuous 11:30-20:30 UTC European blanket" was actually firing ~15:00-21:30: **missing EPL lunch kickoffs entirely and capturing post-game dead books at the tail.** This is very likely a major contributor to soccer sitting at 5-7 capture days for weeks, and it explains A/B runs recording "no makeable markets" for slates that were live the whole time (the 09-08 19:00 UTC A/B started 21:39 and found nothing).
+
+**Fix — wait for the games instead of trusting the clock.** Shifting the crons earlier would compensate a RANDOM delay (observed 1h47m-4h39m) with a FIXED offset — wrong tool. Instead `--wait-minutes` polls for a live makeable game before capturing, so whenever the runner actually boots, capture begins at kickoff. Free, no new infrastructure, uses machinery we already had (`discover_markets` / `pick_smooth_tickers` already detect live books). Wired into `ws-capture.yml` (WAIT 60-120 by window) and `skew-ab.yml` (WAIT 120). Caught while wiring: skew-ab's `timeout-minutes: 45` would have killed the job mid-wait — raised to 180.
+
+**Why NOT EventBridge/Fargate (yet).** It IS the architecturally correct answer — guaranteed delivery vs best-effort, and the account's `fpledge-*` rules prove EventBridge fires on time. But we do not need minute precision: windows are 90-180 min over multi-hour slates; we need "not four hours off," which a poll loop solves for $0. Fargate would be ~$6/mo plus ECR/task-def/IAM work. It becomes right when we want genuine 24/7 always-on capture, or if Actions starts DROPPING runs rather than delaying them, or once real money makes a capture gap cost money instead of data.
+
+**Problem 2 — a stale collector was still running on the laptop.** `com.derekkuang.kxbtc-orderbook` (launchd) was loaded and active, last wrote Sep 8, 2 MB log, still collecting BTC orderbook snapshots for the CLOSED BTC strategy. We disabled its EventBridge twin in August but missed the local agent. Unloaded and archived to `~/Library/LaunchAgents/disabled-2026-09/` (reversible). The `kxbtc-orderbook-collector` Lambda still exists with its trigger disabled — harmless, ~$0.
+
+**Full inventory.** Everything is GitHub Actions: `ci.yml` (push), `pipeline.yml` (daily 02:30), `ws-capture.yml` (8 windows/day), `paper-pilot.yml` (3 weekend crons), `skew-ab.yml` (3 crons), `paper-pilot-politics.yml` (crons commented out — correctly disabled since the 08-10 verdict). Outside Actions: only the two BTC leftovers above. The `fpledge-*` EventBridge rules and Lambdas are a DIFFERENT project sharing the AWS account — worth remembering the $10/mo budget covers both. Airflow/Docker not running.
+
+**A/B status: skew wins 4/4.** net/fill @60s SKEW ON vs OFF — +1.95c/-0.01c, +1.58c/+1.01c, +5.51c/+2.58c, +4.60c/+2.05c; and it pegs less in every session. Best single read is the 09-06 19:20 run: mean |inv| **0.5** despite a max of 18.5 — real excursions that genuinely mean-revert to flat. Caveat: in the 25-min runs skew no longer ELIMINATES pegging (2/4, 1/2), so PEGGED is a coarse flag and mean |inv| is the better measure; markout still swings hard session to session (+0.00c to -3.09c @15s).
+
+---
+
 ## 2026-09-06 — SKEW A/B: yesterday's pegging was a simulation artifact; first two-sided capture observed
 
 Yesterday every paper run pegged inventory at the cap, which made every P&L an inventory mark rather than spread capture. Root cause found: `lp_live` **skews** quotes to mean-revert inventory to flat (`SKEW_PER_CONTRACT * inv` — push the ACCUMULATING side off the touch, keep the REDUCING side there), while `lp_pilot` had **no skew at all** — it merely stopped quoting a side at the hard cap. The paper sim was therefore *strictly more aggressive than the live bot*. Added skew to `lp_pilot` mirroring live exactly (`2d393ef`), with a test asserting the two constants can never drift apart again.

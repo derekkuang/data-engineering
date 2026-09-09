@@ -123,12 +123,25 @@ def main() -> int:
     ap.add_argument("--markets", type=int, default=6)
     ap.add_argument("--poll", type=float, default=6.0)
     ap.add_argument("--prefix", default=None, help="comma-separated series prefixes")
+    ap.add_argument("--wait-minutes", type=float, default=0.0,
+                    help="poll up to N min for a live game before starting. GitHub cron is "
+                         "best-effort (measured 1h47m-4h39m late), so wait for kickoff "
+                         "rather than trusting the clock.")
     args = ap.parse_args()
 
     prefixes = (tuple(p.strip() for p in args.prefix.split(","))
                 if args.prefix else SOCCER_PREFIXES)
     client = KalshiClient(pace_seconds=0.05)
     tickers = pick_smooth_tickers(client, args.markets, prefixes)
+    # Wait for kickoff instead of trusting the clock — see --wait-minutes. A run that fires
+    # 2h late otherwise records "no makeable markets" for a slate that was live the whole time
+    # (measured: the 2026-09-08 19:00 UTC A/B started 21:39 and found nothing).
+    if not tickers and args.wait_minutes > 0:
+        deadline = time.time() + args.wait_minutes * 60
+        print(f"no live markets yet — waiting up to {args.wait_minutes:.0f} min for kickoff...")
+        while not tickers and time.time() < deadline:
+            time.sleep(60.0)
+            tickers = pick_smooth_tickers(client, args.markets, prefixes)
     if not tickers:
         print("No makeable club-soccer markets right now (no game in play, or all books "
               "competed to 1c / below the recent-trade floor).")

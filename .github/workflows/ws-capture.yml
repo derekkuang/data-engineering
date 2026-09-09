@@ -89,15 +89,25 @@ jobs:
           SOCCER="KXMLS,KXLIGAMX,KXBRASILEIRO,KXCOPADOBRASIL,KXALLSVENSKAN,KXELITESERIEN,KXDENSUPERLIGA,KXEPL,KXLALIGA,KXSERIEA,KXBUNDESLIGA,KXLIGUE1,KXUCL,KXUEL,KXEREDIVISIE,KXEFLCHAMPIONSHIP,KXSAUDIPL"
           PREFIX="$CAPTURE_PREFIX"
           MINUTES="$CAPTURE_MINUTES"
+          # WAIT is how we survive GitHub's best-effort cron. Measured 2026-09-08 these
+          # crons fired 1h47m-4h39m LATE (the 11:30 window started 15:13), so fixed-time
+          # windows missed the early European slate and captured post-game dead books.
+          # Shifting the cron would compensate a RANDOM delay with a FIXED offset — wrong.
+          # Instead the job polls for a live game for up to WAIT minutes, so capture starts
+          # at kickoff whenever the runner happens to boot. Free on a public repo.
+          WAIT=0
           case "${{ github.event.schedule }}" in
-            "0 0 * * *"|"0 2 * * *") PREFIX="$SOCCER" ;;
-            "30 11 * * *"|"30 14 * * *"|"30 17 * * *") PREFIX="$SOCCER"; MINUTES=180 ;;
-            "30 20 * * *") PREFIX="$SOCCER"; MINUTES=90 ;;   # late-kickoff tail
+            "0 0 * * *"|"0 2 * * *") PREFIX="$SOCCER"; WAIT=60 ;;
+            "30 11 * * *"|"30 14 * * *"|"30 17 * * *") PREFIX="$SOCCER"; MINUTES=180; WAIT=120 ;;
+            "30 20 * * *") PREFIX="$SOCCER"; MINUTES=90; WAIT=60 ;;   # late-kickoff tail
+            *) WAIT=60 ;;                                             # the --wide control windows
           esac
           if [ -n "$PREFIX" ]; then
-            uv run python -m core.capture.ws_features --minutes "$MINUTES" --wide --prefix "$PREFIX"
+            uv run python -m core.capture.ws_features --minutes "$MINUTES" --wide \
+              --wait-minutes "$WAIT" --prefix "$PREFIX"
           else
-            uv run python -m core.capture.ws_features --minutes "$MINUTES" --wide
+            uv run python -m core.capture.ws_features --minutes "$MINUTES" --wide \
+              --wait-minutes "$WAIT"
           fi
 
       # The capture step outlives the 1-hour OIDC session (90+ min), so the job-start
