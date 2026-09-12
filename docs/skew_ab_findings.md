@@ -521,3 +521,54 @@ Read: two-sided capture iff SKEW ON keeps PEGGED at 0 and mean|inv| near flat
 WHILE net/fill stays positive at 60s. Fill counts are an UPPER bound (queue 
 ignored); markout is queue-independent and is the trustworthy toxicity signal.
 ```
+
+## 2026-09-12 17:18 UTC — skew A/B (soccer)
+```
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+no live markets yet — waiting up to 120 min for kickoff...
+SKEW A/B on 2 markets for 25 min (skew 0.01 vs 0.0), identical inputs to both arms:
+   KXEPLTOTAL-26SEP12TOTEVE-1
+   KXLALIGATOTAL-26SEP12ATHELC-2
+  20 sweeps | pegged: skew 1/2, flat 2/2
+  40 sweeps | pegged: skew 1/2, flat 2/2
+  60 sweeps | pegged: skew 1/2, flat 2/2
+  80 sweeps | pegged: skew 1/2, flat 2/2
+  100 sweeps | pegged: skew 1/2, flat 2/2
+  120 sweeps | pegged: skew 1/2, flat 2/2
+  140 sweeps | pegged: skew 1/2, flat 2/2
+  160 sweeps | pegged: skew 1/2, flat 2/2
+  180 sweeps | pegged: skew 1/2, flat 2/2
+  200 sweeps | pegged: skew 1/2, flat 2/2
+  220 sweeps | pegged: skew 1/2, flat 2/2
+  240 sweeps | pegged: skew 1/2, flat 2/2
+
+==============================================================================
+SKEW A/B — 2 markets, 250 sweeps, identical inputs
+==============================================================================
+
+--- SKEW ON (0.01/contract) = what lp_live does ---
+  fills 112   pooled P&L $+1.71   PEGGED 1/2   mean|inv| 1.0   mean max|inv| 17.5 (cap 20)
+     15s  n=  112  markout +0.19c   net +4.36c
+     30s  n=  109  markout +0.61c   net +4.86c
+     60s  n=  105  markout +0.45c   net +4.70c
+    per-market max|inv|: 6SEP12ATHELC-2=20*, 6SEP12TOTEVE-1=15
+
+--- SKEW OFF (0.0) = no inventory lean ---
+  fills 169   pooled P&L $-1.63   PEGGED 2/2   mean|inv| 16.5   mean max|inv| 20.0 (cap 20)
+     15s  n=  168  markout +0.08c   net +1.44c
+     30s  n=  165  markout +0.36c   net +1.73c
+     60s  n=  160  markout +0.13c   net +1.44c
+    per-market max|inv|: 6SEP12TOTEVE-1=20*, 6SEP12ATHELC-2=20*
+
+Read: two-sided capture iff SKEW ON keeps PEGGED at 0 and mean|inv| near flat 
+WHILE net/fill stays positive at 60s. Fill counts are an UPPER bound (queue 
+ignored); markout is queue-independent and is the trustworthy toxicity signal.
+```
