@@ -72,23 +72,40 @@ def test_vol_features_single_point_is_zero() -> None:
 
 def test_discover_markets_wide_vs_gated() -> None:
     """The capture's wide mode keeps the known-toxic controls (ITF, GAME/MATCH types) that the
-    maker's trading gate excludes — but both modes keep the activity floor and prop excludes."""
+    maker's trading gate excludes — but both modes keep the activity floor and prop excludes.
+
+    The activity floor is now measured PER-TICKER (`recent_trade_rate`), not as a share of the
+    exchange-wide tape: that shared 1000-row window gets crowded out by high-frequency series
+    (KXBTC15M held 322/1000 on 2026-09-05), which silently stopped soccer from being captured
+    and desynced capture from the maker — on the 2026-09-12 live pilot the maker found the game
+    while discovery returned nothing. So the fake serves the tape AND per-ticker prints."""
+    from datetime import UTC, datetime, timedelta
     from typing import Any, cast
 
     from core.capture.ws_logger import discover_markets
     from ingestion.kalshi import KalshiClient
 
+    fresh = (datetime.now(UTC) - timedelta(seconds=30)).isoformat().replace("+00:00", "Z")
+    RATES = {
+        "KXMLSTOTAL-A": 20,      # benign TOTAL, active -> both modes
+        "KXITFMATCH-B": 25,      # known-toxic control -> wide only
+        "KXMLBGAME-C": 18,       # GAME type (trends) -> wide only
+        "KXMLSTOTAL-THIN": 3,    # under the activity floor -> neither
+        "KXWCGOAL-D": 30,        # JUMPY prop -> neither (label too noisy)
+    }
+
     class FakeClient:
         def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-            def rows(tk: str, n: int) -> list[dict[str, str]]:
-                return [{"ticker": tk}] * n
-            return {"trades": (
-                rows("KXMLSTOTAL-A", 20)        # benign TOTAL, active -> both modes
-                + rows("KXITFMATCH-B", 25)      # known-toxic control -> wide only
-                + rows("KXMLBGAME-C", 18)       # GAME type (trends) -> wide only
-                + rows("KXMLSTOTAL-THIN", 3)    # under the activity floor -> neither
-                + rows("KXWCGOAL-D", 30)        # JUMPY prop -> neither (label too noisy)
-            )}
+            params = params or {}
+            if path == "/markets/trades" and "ticker" in params:
+                n = RATES.get(str(params["ticker"]), 0)
+                return {"trades": [{"created_time": fresh} for _ in range(n)]}
+            if path == "/markets/trades":
+                out: list[dict[str, str]] = []
+                for tk, n in RATES.items():
+                    out += [{"ticker": tk}] * n
+                return {"trades": out}
+            return {"events": []}   # enumerate_candidates finds nothing extra
 
     client = cast(KalshiClient, FakeClient())
     gated = discover_markets(client, None, 10)

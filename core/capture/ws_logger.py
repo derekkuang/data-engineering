@@ -33,7 +33,14 @@ from typing import Any
 from dotenv import load_dotenv
 
 from core.maker.lp_gate import MIN_RECENT_TRADES, passes_gate
-from core.maker.lp_pilot import ELIGIBLE_PREFIXES, EXCLUDE, JUMPY, is_mean_reverting
+from core.maker.lp_pilot import (
+    ELIGIBLE_PREFIXES,
+    EXCLUDE,
+    JUMPY,
+    enumerate_candidates,
+    is_mean_reverting,
+    recent_trade_rate,
+)
 from ingestion.kalshi import SERIES_BTC_15M, KalshiClient
 from ingestion.kalshi_ws import KalshiWS, rest_top_of_book
 
@@ -74,14 +81,28 @@ def discover_markets(
             continue
         if any(tk.startswith(p) for p in pfx):
             counts[tk] += 1
+    # The shared tape is a FIXED 1000-row window for the WHOLE exchange, so a
+    # high-frequency series crowds everything else out of it. Measured 2026-09-05:
+    # KXBTC15M alone held 322/1000 slots (crypto ~45%), and a Bundesliga TOTAL doing 63
+    # prints/5min read as ~5 -> failed the >=15 floor -> NOT CAPTURED. This is the likely
+    # mechanism behind soccer sitting at 5-7 capture days. Worse, it desynced capture from
+    # the maker: on the 2026-09-12 live pilot pick_smooth_ticker found the game while this
+    # function returned nothing, so the pilot ran with NO paired book data.
+    # Fix: union the tape with a tape-INDEPENDENT enumeration, and gate on the market's OWN
+    # recent prints. `wide` (the measurement universe) keeps known-toxic families as markout
+    # controls, so it only needs the activity floor, not the maker's type/family gate.
+    ordered = [tk for tk, _ in counts.most_common()]
+    seen = set(ordered)
+    ordered += [tk for tk in enumerate_candidates(client, pfx) if tk not in seen]
     out: list[str] = []
-    for tk, c in counts.most_common():
+    for tk in ordered:
         if len(out) >= cap:
             break
+        rate = recent_trade_rate(client, tk)
         if wide:
-            if c >= MIN_RECENT_TRADES:
+            if rate >= MIN_RECENT_TRADES:
                 out.append(tk)
-        elif passes_gate(tk, c) and is_mean_reverting(tk):
+        elif passes_gate(tk, rate) and is_mean_reverting(tk):
             out.append(tk)
     return out
 
