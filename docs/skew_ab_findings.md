@@ -667,3 +667,67 @@ Read: two-sided capture iff SKEW ON keeps PEGGED at 0 and mean|inv| near flat
 WHILE net/fill stays positive at 60s. Fill counts are an UPPER bound (queue 
 ignored); markout is queue-independent and is the trustworthy toxicity signal.
 ```
+
+## 2026-09-13 19:34 UTC — skew A/B (soccer)
+```
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+no live markets yet — waiting up to 120 min for kickoff...
+SKEW A/B on 1 markets for 25 min (skew 0.01 vs 0.0), identical inputs to both arms:
+   KXSERIEATOTAL-26SEP13SASJUV-1
+  20 sweeps | pegged: skew 0/1, flat 1/1
+  40 sweeps | pegged: skew 0/1, flat 1/1
+  60 sweeps | pegged: skew 0/1, flat 1/1
+  80 sweeps | pegged: skew 0/1, flat 1/1
+  100 sweeps | pegged: skew 0/1, flat 1/1
+  120 sweeps | pegged: skew 0/1, flat 1/1
+  140 sweeps | pegged: skew 0/1, flat 1/1
+  160 sweeps | pegged: skew 0/1, flat 1/1
+  180 sweeps | pegged: skew 0/1, flat 1/1
+  200 sweeps | pegged: skew 0/1, flat 1/1
+  220 sweeps | pegged: skew 0/1, flat 1/1
+  240 sweeps | pegged: skew 0/1, flat 1/1
+
+==============================================================================
+SKEW A/B — 1 markets, 250 sweeps, identical inputs
+==============================================================================
+
+--- SKEW ON (0.01/contract) = what lp_live does ---
+  fills 63   pooled P&L $+2.28   PEGGED 0/1   mean|inv| 1.0   mean max|inv| 13.0 (cap 20)
+     15s  n=   61  markout -0.10c   net +2.95c
+     30s  n=   60  markout -0.17c   net +2.93c
+     60s  n=   59  markout -0.22c   net +2.90c
+    per-market max|inv|: 6SEP13SASJUV-1=13
+
+--- SKEW OFF (0.0) = no inventory lean ---
+  fills 86   pooled P&L $+2.93   PEGGED 1/1   mean|inv| 16.0   mean max|inv| 20.0 (cap 20)
+     15s  n=   81  markout -0.64c   net +0.38c
+     30s  n=   80  markout -0.59c   net +0.43c
+     60s  n=   79  markout -0.78c   net +0.25c
+    per-market max|inv|: 6SEP13SASJUV-1=20*
+
+Read: two-sided capture iff SKEW ON keeps PEGGED at 0 and mean|inv| near flat 
+WHILE net/fill stays positive at 60s. Fill counts are an UPPER bound (queue 
+ignored); markout is queue-independent and is the trustworthy toxicity signal.
+```
