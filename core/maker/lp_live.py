@@ -42,8 +42,10 @@ import csv
 import os
 import random
 import sys
+import threading
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -62,6 +64,7 @@ from core.maker.lp_pilot import (
     best_bid_ask,
     better_market,
     pick_smooth_ticker,
+    pick_smooth_tickers,
 )
 from core.maker.quotable import load_quotable
 from ingestion.kalshi import INLINE_KEY_ENV_VARS, KalshiClient
@@ -327,6 +330,7 @@ def _run_market(
     config_tag: str = CONFIG_VERSION,
     prefixes: tuple[str, ...] | None = None,
     feed: WsBookFeed | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> tuple[str, float, str | None]:
     """Quote one market until it resolves (dead book), the kill switch trips, the flow
     dries up (thin/illiquid), a much more active market appears (while we're flat), or
@@ -423,6 +427,9 @@ def _run_market(
     switch_target: str | None = None  # the hotter market to switch into
     try:
         while time.time() < end and not halted:
+            if should_stop is not None and should_stop():
+                print(f"  [{tk}] session stop requested — flattening and exiting.")
+                break
             t0 = time.time()
             try:
                 ingest_fills()  # account for fills BEFORE cancelling this poll's orders
@@ -693,6 +700,104 @@ def _run_market(
     return reason, cash + inv * mid, switch_target
 
 
+def live_multi(
+    tickers: list[str],
+    minutes: float,
+    poll: float,
+    *,
+    debug: bool = False,
+    quote_size: int = QUOTE_SIZE,
+    config_tag: str = CONFIG_VERSION,
+    prefixes: tuple[str, ...] | None = None,
+    session_kill: float = DAILY_LOSS_LIMIT,
+) -> int:
+    """Quote SEVERAL markets CONCURRENTLY, one thread per market.
+
+    WHY (measured 2026-09-12/13): a club-soccer book is simultaneously wide enough (>=2c) and
+    active (>=1 trade/min) only ~6% of the time — median spread 1.31-1.83c, ~84% of snapshots
+    have no flow at all. Quoting ONE market at a time is therefore structurally starved: the
+    first real-money pilot got ZERO fills in 8 of 12 market-sessions and a fill rate 12-50x
+    below paper. Holding quotes across several books catches whichever one is currently inside
+    its makeable window.
+
+    SAFETY — deliberately built as an orchestrator around the UNCHANGED single-market path:
+      * each thread runs `_run_market`, so per-market inventory cap, per-market kill switch,
+        flatten-on-exit, fill accounting and the fail-CLOSED family gate are all untouched;
+      * each thread gets its OWN KalshiClient — no shared mutable client state across threads;
+      * the SESSION kill is the only shared state (one lock). When aggregate P&L breaches it,
+        every thread is asked to stop cooperatively via `should_stop`, so each still runs its
+        normal flatten/cancel/log path rather than being abandoned mid-quote;
+      * markets are diversified across matches by the caller (`pick_smooth_tickers`,
+        max_per_event=2) — the buckets of one game are the SAME bet, so N slots from one match
+        would be N x the exposure, not N independent books.
+
+    Capital note: each two-sided 1-lot quote ties up ~$1 of collateral, so N markets needs
+    roughly $N plus inventory headroom. Under-funding shows up as order REJECTIONS, which
+    corrupt the fill-rate measurement this whole exercise exists to produce.
+    """
+    end = time.time() + minutes * 60
+    lock = threading.Lock()
+    session_pnl = 0.0
+    stopped = False
+    results: list[tuple[str, float]] = []
+
+    def should_stop() -> bool:
+        with lock:
+            return stopped
+
+    def worker(tk: str) -> None:
+        nonlocal session_pnl, stopped
+        c = KalshiClient(pace_seconds=0.1)  # per-thread client: no shared mutable state
+        retired: set[str] = set()
+        try:
+            while time.time() < end and not should_stop():
+                reason, pnl, nxt = _run_market(
+                    c, tk, end, poll, debug, retired, allow_switch=False,
+                    quote_size=quote_size, config_tag=config_tag, prefixes=prefixes,
+                    should_stop=should_stop,
+                )
+                with lock:
+                    session_pnl += pnl
+                    results.append((tk, pnl))
+                    if session_pnl <= -session_kill:
+                        if not stopped:
+                            print(f"\n*** SESSION KILL: aggregate ${session_pnl:+.2f} "
+                                  f"<= -${session_kill:.0f} — stopping all markets. ***")
+                        stopped = True
+                print(f"  [{tk[-24:]}] ended ({reason}), pnl ${pnl:+.2f}; "
+                      f"session ${session_pnl:+.2f}")
+                if reason in ("time", "kill") or should_stop():
+                    break
+                retired.add(tk)
+                # roll: this thread takes a fresh market the other threads are not on
+                with lock:
+                    taken = {t for t, _ in results} | retired
+                cand = pick_smooth_ticker(c, exclude=taken, prefixes=prefixes)
+                if not cand:
+                    break
+                tk = cand
+        except Exception as exc:  # one market's failure must not strand the others
+            print(f"  [{tk[-24:]}] thread error: {str(exc)[:100]}")
+        finally:
+            try:
+                cancel_all(c, tk)   # belt-and-braces: never leave resting orders behind
+            except Exception:
+                pass
+            c.close()
+
+    print(f"MULTI-MARKET live: {len(tickers)} markets, cap +/-{MAX_POSITION} EACH, "
+          f"kill -${session_kill:.0f}/mkt + session, size {quote_size}")
+    for t in tickers:
+        print(f"   {t}")
+    threads = [threading.Thread(target=worker, args=(t,), daemon=True) for t in tickers]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    print(f"\nSESSION DONE: {len(results)} market-run(s), total mark P&L ${session_pnl:+.2f}")
+    return 0
+
+
 def live(
     client: KalshiClient,
     ticker: str | None,
@@ -798,6 +903,12 @@ def main() -> int:
     ap.add_argument("--poll", type=float, default=POLL_SECONDS)
     ap.add_argument("--debug", action="store_true", help="dump raw fill records (verify shape)")
     ap.add_argument(
+        "--markets", type=int, default=1,
+        help="quote N markets CONCURRENTLY (one thread each, own inventory cap + kill; "
+             "diversified max 2 per match). A club book is makeable only ~6%% of the "
+             "time, so single-market quoting is structurally starved.",
+    )
+    ap.add_argument(
         "--no-switch",
         action="store_true",
         help="disable mid-session switching to busier markets (stay until each resolves)",
@@ -884,6 +995,24 @@ def main() -> int:
                 print("  → the bot will IDLE (fail-closed): nothing freshly CONFIRMED and no "
                       "--pilot. Run `edge_verdict --emit` when capture is sufficient.")
 
+            if args.markets > 1:
+                # Multi-market runs AFTER the fail-CLOSED gate above is installed, so every
+                # thread inherits the same policy. Diversified across MATCHES (max 2 per
+                # game): the buckets of one match are the same bet, so N slots from one game
+                # would be N x exposure, not N independent books.
+                size = PILOT_QUOTE_SIZE if pilots else QUOTE_SIZE
+                kill = PILOT_LOSS_LIMIT if pilots else DAILY_LOSS_LIMIT
+                tickers = pick_smooth_tickers(client, args.markets, prefixes)
+                if not tickers:
+                    print("No makeable markets right now — nothing to quote.")
+                    return 0
+                need = len(tickers) * 1.0
+                print(f"  NOTE: ~${need:.0f} collateral needed for {len(tickers)} two-sided "
+                      f"1-lot quotes; under-funding shows up as order REJECTIONS.")
+                return live_multi(
+                    tickers, args.minutes, args.poll, debug=args.debug, quote_size=size,
+                    config_tag=CONFIG_VERSION, prefixes=prefixes, session_kill=kill,
+                )
             return live(
                 client, args.ticker, args.minutes, args.poll, args.debug,
                 switch=not args.no_switch, ab=args.ab, prefixes=prefixes, use_ws=args.ws,
