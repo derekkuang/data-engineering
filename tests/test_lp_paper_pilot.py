@@ -343,3 +343,45 @@ def test_live_multi_claims_markets_exclusively():
     # releasing lets it be reclaimed
     active.discard("N")
     assert claim("N", set()) is True
+
+
+# --- persistent daily loss budget -------------------------------------------------
+# Per-market and per-session kills bound ONE run. They say nothing about a scheduler
+# firing six sessions a night, which is exactly how a capped strategy bleeds steadily.
+
+def test_daily_budget_records_gates_and_resets(tmp_path):
+    from core.maker import budget
+    f = str(tmp_path / "b.json")
+    assert budget.remaining(f) == 5.0 and not budget.exhausted(f)
+
+    budget.record(-2.0, f)
+    assert budget.remaining(f) == pytest.approx(3.0)
+    assert not budget.exhausted(f)
+
+    budget.record(-3.0, f)                      # cumulative -5.0 -> exhausted
+    assert budget.remaining(f) == 0.0
+    assert budget.exhausted(f)
+
+    # PROFIT must not create extra headroom beyond the budget
+    budget.record(+10.0, f)
+    assert budget.remaining(f) == 5.0
+
+
+def test_daily_budget_fails_CLOSED_on_corrupt_file(tmp_path):
+    """A budget that fails OPEN is not a budget — an unreadable file must block trading,
+    not silently grant a fresh day."""
+    from core.maker import budget
+    f = tmp_path / "b.json"
+    f.write_text("{ not json")
+    assert budget.exhausted(str(f)) is True
+
+
+def test_daily_budget_is_keyed_to_et_day(tmp_path):
+    """Keyed on ET (the repo's trading-day unit) so a session spanning midnight UTC does not
+    silently get a fresh budget mid-run."""
+    from datetime import datetime
+
+    from core.maker import budget
+    # 02:00 UTC is still the PREVIOUS ET day (UTC-4)
+    assert budget.et_day(datetime(2026, 9, 15, 2, 0)) == "2026-09-14"
+    assert budget.et_day(datetime(2026, 9, 15, 5, 0)) == "2026-09-15"

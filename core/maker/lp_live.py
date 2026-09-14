@@ -54,7 +54,7 @@ import httpx
 from dotenv import load_dotenv
 
 from core.capture.ws_book_feed import WsBookFeed
-from core.maker import lp_gate
+from core.maker import budget, lp_gate
 from core.maker.lp_pilot import (
     DAILY_LOSS_LIMIT,
     MAX_MID,
@@ -83,7 +83,11 @@ QUOTE_SIZE = 2  # contracts posted per side per poll (was 1). The scale lever �
 # --pilot mode (deliberately quoting an UNCONFIRMED family to gather its first realized
 # evidence) runs under hard caps: min size + a tight session kill, so a wrong bet is small.
 PILOT_QUOTE_SIZE = 1
-PILOT_LOSS_LIMIT = 5.0  # dollars; session kill when piloting (vs DAILY_LOSS_LIMIT otherwise)
+PILOT_LOSS_LIMIT = 5.0  # dollars; SESSION kill when piloting (vs DAILY_LOSS_LIMIT otherwise)
+# PER-MARKET kill when piloting. This used to be missing: the per-market kill inside
+# _run_market was hardcoded to DAILY_LOSS_LIMIT ($10), so "pilot: kill $5" only ever gated
+# the SESSION — an individual market could still bleed $10. Tightened to $2 (2026-09-14).
+PILOT_MARKET_LOSS_LIMIT = 2.0
 MARKOUT_HORIZON_S = 30  # seconds; the edge signal = did mid move against us post-fill
 # WS-fills (--ws): our executions arrive on the private `fill` channel (low latency) BUT it
 # carries no seq numbers, so a dropped message is undetectable. REST /portfolio/fills stays the
@@ -331,6 +335,7 @@ def _run_market(
     prefixes: tuple[str, ...] | None = None,
     feed: WsBookFeed | None = None,
     should_stop: Callable[[], bool] | None = None,
+    market_kill: float = DAILY_LOSS_LIMIT,
 ) -> tuple[str, float, str | None]:
     """Quote one market until it resolves (dead book), the kill switch trips, the flow
     dries up (thin/illiquid), a much more active market appears (while we're flat), or
@@ -465,7 +470,7 @@ def _run_market(
                 pnl_min, pnl_max = min(pnl_min, pnl), max(pnl_max, pnl)
                 pnl_hist.append((time.time(), pnl))
                 print(f"  inv {inv:+.2f}  mid {mid:.2f}  fills {n_fills}  P&L ${pnl:+.2f}")
-                if pnl <= -DAILY_LOSS_LIMIT:  # KILL SWITCH (finally cancels + flattens)
+                if pnl <= -market_kill:  # KILL SWITCH (finally cancels + flattens)
                     print("  KILL SWITCH — stop; flatten on exit.")
                     halted = True
                     break
@@ -710,6 +715,7 @@ def live_multi(
     config_tag: str = CONFIG_VERSION,
     prefixes: tuple[str, ...] | None = None,
     session_kill: float = DAILY_LOSS_LIMIT,
+    market_kill: float = DAILY_LOSS_LIMIT,
 ) -> int:
     """Quote SEVERAL markets CONCURRENTLY, one thread per market.
 
@@ -769,11 +775,20 @@ def live_multi(
                 reason, pnl, nxt = _run_market(
                     c, tk, end, poll, debug, retired, allow_switch=False,
                     quote_size=quote_size, config_tag=config_tag, prefixes=prefixes,
-                    should_stop=should_stop,
+                    should_stop=should_stop, market_kill=market_kill,
                 )
+                # Book against the PERSISTENT daily budget before anything else — it is the
+                # only cap that survives across sessions and processes (a scheduler firing
+                # repeatedly is exactly how a capped strategy bleeds).
+                day_total = budget.record(pnl)
                 with lock:
                     session_pnl += pnl
                     results.append((tk, pnl))
+                    if budget.exhausted():
+                        if not stopped:
+                            print(f"\n*** DAILY BUDGET EXHAUSTED (${day_total:+.2f} today) "
+                                  f"— stopping all markets. ***")
+                        stopped = True
                     if session_pnl <= -session_kill:
                         if not stopped:
                             print(f"\n*** SESSION KILL: aggregate ${session_pnl:+.2f} "
@@ -810,7 +825,9 @@ def live_multi(
             c.close()
 
     print(f"MULTI-MARKET live: {len(tickers)} markets, cap +/-{MAX_POSITION} EACH, "
-          f"kill -${session_kill:.0f}/mkt + session, size {quote_size}, pace {pace:.2f}s")
+          f"kill -${market_kill:.0f}/mkt, -${session_kill:.0f}/session, size {quote_size}, "
+          f"pace {pace:.2f}s")
+    print(f"  {budget.status_line()}")
     for t in tickers:
         print(f"   {t}")
     threads = [threading.Thread(target=worker, args=(t,), daemon=True) for t in tickers]
@@ -847,6 +864,7 @@ def live(
     _need_auth(client)
     allow_switch = switch and ticker is None  # pinned market is never switched away from
     session_kill = PILOT_LOSS_LIMIT if pilot else DAILY_LOSS_LIMIT
+    market_kill = PILOT_MARKET_LOSS_LIMIT if pilot else DAILY_LOSS_LIMIT
     end = time.time() + minutes * 60
     sw = (
         f", switches while flat to {EAGER_FACTOR:g}-{STICKY_FACTOR:g}x-busier markets "
@@ -895,7 +913,8 @@ def live(
                 ready = feed.wait_for_book(tk, timeout=5.0)
                 print(f"  [ws] book {'live' if ready else 'not ready (loop will wait)'} for {tk}")
             reason, pnl, nxt = _run_market(
-                client, tk, end, poll, debug, retired, allow_switch, size, tag, prefixes, feed=feed
+                client, tk, end, poll, debug, retired, allow_switch, size, tag, prefixes,
+                feed=feed, market_kill=market_kill,
             )
             session_pnl += pnl
             if reason == "switch":
@@ -903,6 +922,10 @@ def live(
             else:
                 retired.add(tk)  # resolved/dud/left markets won't be re-picked this session
             print(f"  [{tk}] ended ({reason}); session P&L so far ${session_pnl:+.2f}")
+            budget.record(pnl)   # persistent daily cap (survives sessions/processes)
+            if budget.exhausted():
+                print(f"  *** DAILY BUDGET EXHAUSTED — {budget.status_line()} — stopping. ***")
+                break
             if reason == "kill" or session_pnl <= -session_kill:
                 print("  SESSION KILL — stopping.")
                 break
@@ -1019,6 +1042,12 @@ def main() -> int:
                 print("  → the bot will IDLE (fail-closed): nothing freshly CONFIRMED and no "
                       "--pilot. Run `edge_verdict --emit` when capture is sufficient.")
 
+            # HARD GATE: refuse to start if today's realized losses already hit the budget.
+            # Checked for BOTH paths, before a single order is placed.
+            print(f"  {budget.status_line()}")
+            if budget.exhausted():
+                print("  → REFUSING to trade: daily loss budget exhausted. Resets next ET day.")
+                return 0
             if args.markets > 1:
                 # Multi-market runs AFTER the fail-CLOSED gate above is installed, so every
                 # thread inherits the same policy. Diversified across MATCHES (max 2 per
@@ -1026,6 +1055,7 @@ def main() -> int:
                 # would be N x exposure, not N independent books.
                 size = PILOT_QUOTE_SIZE if pilots else QUOTE_SIZE
                 kill = PILOT_LOSS_LIMIT if pilots else DAILY_LOSS_LIMIT
+                mkt_kill = PILOT_MARKET_LOSS_LIMIT if pilots else DAILY_LOSS_LIMIT
                 tickers = pick_smooth_tickers(client, args.markets, prefixes)
                 if not tickers:
                     print("No makeable markets right now — nothing to quote.")
@@ -1051,6 +1081,7 @@ def main() -> int:
                 return live_multi(
                     tickers, args.minutes, args.poll, debug=args.debug, quote_size=size,
                     config_tag=CONFIG_VERSION, prefixes=prefixes, session_kill=kill,
+                    market_kill=mkt_kill,
                 )
             return live(
                 client, args.ticker, args.minutes, args.poll, args.debug,
