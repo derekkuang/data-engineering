@@ -4,6 +4,28 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-09-12/13 — FIRST REAL MONEY on club soccer: the binding constraint is OPPORTUNITY, not toxicity
+
+Ran the first live club-soccer pilot. **29 fills / 12 market-sessions / −$0.22** (balance $15.61 → $15.39). Mechanically a clean success — **23 of 29 fills were PASSIVE maker fills at zero fee**, inventory returned to flat every time, nothing pegged, no kill switch, zero open positions at the end. The 6 taker fills ($0.035) were the aggressive flatten doing its job.
+
+**The losses were NOT adverse selection.** The biggest sample (TOTEVE-1, 18 fills) had markout **+0.139c — FAVORABLE** — and still lost $0.084. The mid moved our way and we lost anyway: the money went to spread + the cost of crossing to flatten. That is a different failure mode than the one our whole toxicity apparatus measures.
+
+**Real fill rate is 12–50x below paper.** Live 0.16 and 0.57 fills/min vs paper's 7–31; **8 of 12 market-sessions got ZERO fills**. Exactly the number paper cannot produce, and the reason to run a pilot at all.
+
+**The screen that explains it: a club book is makeable only ~6% of the time.** Over 253k captured snapshots, a club TOTAL/SPREAD book is simultaneously ≥2c wide AND ≥1 trade/min just **5.9%/6.8%** of the time (median spread 1.31c/1.83c). Half the time it is under 2c; ~84% of the time there is no flow. A 6% duty cycle explains the fill rate with no toxicity story needed.
+
+**And the league ranking INVERTS — the marquee competitions are the worst:** LigaMX 12.1% makeable (2.03c median), MLS 9.6%, Brasileirao 8.8% (3.71c), Ligue1 7.9% (5.11c) … EPL 6.4%, LaLiga 5.7%, **UCL 4.5%** — UCL and La Liga sit at a **1.00c median**, pinned to the minimum tick. More prestige and volume ⇒ more competing makers ⇒ spread competed away. The same mechanism that killed Polymarket for us.
+
+**This corrects my own 2026-09-02 call.** I moved the pilot pin Liga MX → La Liga because big-five was better-CAPTURED and in-season. That measured our LOGGING, not tradeability. On makeable duty cycle La Liga is near the bottom and Liga MX is the best. Revised targets: **Liga MX / Brasileirao / Ligue 1**.
+
+**Also fixed (`370f7e8`):** the pilot exposed that `discover_markets` still had the tape-crowding bug — the maker found the game and quoted it while capture returned nothing, so the first real-money session ran with NO paired book data. Now uses per-ticker rates + tape-independent enumeration; verified it returns 6 in-play markets where it previously returned none. Very likely another major cause of soccer sitting at 5–7 capture days.
+
+**Two process failures of mine worth recording:** I piped a live-money session to `tail`, which buffers until exit — so I flew it blind and had to reconstruct state from account queries. And I fixed the crowding bug in the maker on 09-05 but not in the capture, leaving the two desynced for a week.
+
+**Verdict + stopping rule** written into `strategies/soccer_mm/VERDICT.md`: the strategy is not disproven, but multi-market LIVE quoting is now the highest-value capability (a 6% per-book duty cycle starves single-market quoting), and economics stay small (~$0.59/hr at size 1 even on WC-grade assumptions). Pre-committed: **at most 5 more live sessions** on the revised targets with multi-market; if cumulative realized capture is not positive, close the track and write it up as a null.
+
+---
+
 ## 2026-09-10 — workflow audit: GitHub cron runs 2-4.5h LATE; capture now waits for kickoff
 
 Audited every scheduled thing after 4 A/B sessions banked. Two real problems.
