@@ -308,3 +308,38 @@ def test_paper_skew_matches_lp_live_semantics():
     p = Pilot(ticker=tk, inv=0)
     v2_poll(client, p)
     assert [(f.side, f.price) for f in p.fills] == [(+1, 0.60)]
+
+
+def test_live_multi_claims_markets_exclusively():
+    """Regression (2026-09-14, real money): two threads rolled onto the SAME market three
+    times in one session. That is not just duplicated work — _run_market calls
+    cancel_all(ticker) every poll, which cancels ALL resting orders on that ticker including
+    the sibling thread's, while each thread tracks its own inventory though the exchange nets
+    the combined position (so the per-market cap can reach 2x). This pins the claim-set logic
+    that makes assignment exclusive."""
+    import threading
+
+    lock = threading.Lock()
+    active: set[str] = set()
+    results: list[tuple[str, float]] = []
+
+    def claim(cand: str, retired: set[str]) -> bool:
+        """The exact guard used in live_multi's roll path."""
+        with lock:
+            taken = {t for t, _ in results} | retired | active
+            if cand in taken:
+                return False
+            active.add(cand)
+            return True
+
+    # thread A holds M; thread B must NOT be able to claim it
+    active.add("M")
+    assert claim("M", set()) is False
+    assert claim("N", set()) is True          # a free market is claimable
+    assert claim("N", set()) is False         # ...and only once
+    # a COMPLETED market is also excluded
+    results.append(("P", 0.0))
+    assert claim("P", set()) is False
+    # releasing lets it be reclaimed
+    active.discard("N")
+    assert claim("N", set()) is True

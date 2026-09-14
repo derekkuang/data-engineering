@@ -740,6 +740,14 @@ def live_multi(
     session_pnl = 0.0
     stopped = False
     results: list[tuple[str, float]] = []
+    # Tickers a thread is CURRENTLY quoting. Rolling previously excluded only COMPLETED
+    # markets (`results`) and the thread's own `retired`, so two threads could roll onto the
+    # SAME book — observed live 2026-09-14 (three collisions). That is not merely duplicated
+    # work: `_run_market` calls cancel_all(ticker) every poll, which cancels ALL resting
+    # orders on that ticker INCLUDING the sibling thread's, while each thread tracks its own
+    # inventory though the exchange nets the combined position (so the per-market cap can
+    # reach 2x). Claim-before-quote under the lock makes assignment exclusive.
+    active: set[str] = set()
 
     def should_stop() -> bool:
         with lock:
@@ -749,6 +757,8 @@ def live_multi(
         nonlocal session_pnl, stopped
         c = KalshiClient(pace_seconds=0.1)  # per-thread client: no shared mutable state
         retired: set[str] = set()
+        with lock:
+            active.add(tk)
         try:
             while time.time() < end and not should_stop():
                 reason, pnl, nxt = _run_market(
@@ -769,16 +779,25 @@ def live_multi(
                 if reason in ("time", "kill") or should_stop():
                     break
                 retired.add(tk)
-                # roll: this thread takes a fresh market the other threads are not on
+                # roll: claim a fresh market EXCLUSIVELY. `active` is the fix for the
+                # 2026-09-14 collision — without it two threads land on the same book and
+                # cancel each other's orders.
                 with lock:
-                    taken = {t for t, _ in results} | retired
+                    active.discard(tk)
+                    taken = {t for t, _ in results} | retired | active
                 cand = pick_smooth_ticker(c, exclude=taken, prefixes=prefixes)
                 if not cand:
                     break
+                with lock:
+                    if cand in active:      # another thread claimed it between calls
+                        break
+                    active.add(cand)
                 tk = cand
         except Exception as exc:  # one market's failure must not strand the others
             print(f"  [{tk[-24:]}] thread error: {str(exc)[:100]}")
         finally:
+            with lock:
+                active.discard(tk)
             try:
                 cancel_all(c, tk)   # belt-and-braces: never leave resting orders behind
             except Exception:
