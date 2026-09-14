@@ -753,9 +753,14 @@ def live_multi(
         with lock:
             return stopped
 
+    # Each thread makes ~2-3 REST calls per poll. With many threads the AGGREGATE rate is
+    # what trips Kalshi's limiter (we saw 429s on /events during the A/B), so pace each
+    # client in proportion to the thread count rather than using a fixed 0.1s.
+    pace = max(0.1, 0.05 * len(tickers))
+
     def worker(tk: str) -> None:
         nonlocal session_pnl, stopped
-        c = KalshiClient(pace_seconds=0.1)  # per-thread client: no shared mutable state
+        c = KalshiClient(pace_seconds=pace)  # per-thread client: no shared mutable state
         retired: set[str] = set()
         with lock:
             active.add(tk)
@@ -805,7 +810,7 @@ def live_multi(
             c.close()
 
     print(f"MULTI-MARKET live: {len(tickers)} markets, cap +/-{MAX_POSITION} EACH, "
-          f"kill -${session_kill:.0f}/mkt + session, size {quote_size}")
+          f"kill -${session_kill:.0f}/mkt + session, size {quote_size}, pace {pace:.2f}s")
     for t in tickers:
         print(f"   {t}")
     threads = [threading.Thread(target=worker, args=(t,), daemon=True) for t in tickers]
@@ -1025,9 +1030,24 @@ def main() -> int:
                 if not tickers:
                     print("No makeable markets right now — nothing to quote.")
                     return 0
-                need = len(tickers) * 1.0
-                print(f"  NOTE: ~${need:.0f} collateral needed for {len(tickers)} two-sided "
-                      f"1-lot quotes; under-funding shows up as order REJECTIONS.")
+                # COLLATERAL GUARD. A two-sided 1-lot quote ties up ~$1 (bid + ask), times
+                # size, plus inventory headroom. Under-funding surfaces as order
+                # REJECTIONS, which silently corrupt the fill-rate measurement this whole
+                # exercise exists to produce — so refuse rather than collect bad data.
+                need = len(tickers) * 1.0 * size
+                try:
+                    bal = float(client.get_balance().get("balance_dollars") or 0.0)
+                except Exception:
+                    bal = 0.0
+                headroom = 1.5  # want ~50% over the resting requirement for inventory
+                print(f"  collateral: need ~${need:.0f} for {len(tickers)} two-sided "
+                      f"size-{size} quotes; balance ${bal:.2f}")
+                if bal < need * headroom:
+                    afford = max(1, int(bal / (headroom * size)))
+                    print(f"  ⚠ UNDER-FUNDED for {len(tickers)} markets — trimming to "
+                          f"{afford} to avoid order rejections corrupting the fill data. "
+                          f"(Fund ~${need * headroom:.0f} to run the full width.)")
+                    tickers = tickers[:afford]
                 return live_multi(
                     tickers, args.minutes, args.poll, debug=args.debug, quote_size=size,
                     config_tag=CONFIG_VERSION, prefixes=prefixes, session_kill=kill,
