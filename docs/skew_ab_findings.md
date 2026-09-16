@@ -1001,3 +1001,145 @@ Read: two-sided capture iff SKEW ON keeps PEGGED at 0 and mean|inv| near flat
 WHILE net/fill stays positive at 60s. Fill counts are an UPPER bound (queue 
 ignored); markout is queue-independent and is the trustworthy toxicity signal.
 ```
+
+## 2026-09-16 21:56 UTC — skew A/B (soccer)
+```
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+no live markets yet — waiting up to 120 min for kickoff...
+SKEW A/B on 1 markets for 25 min (skew 0.01 vs 0.0), identical inputs to both arms:
+   KXLALIGASPREAD-26SEP19SEVBAR-BAR2
+  20 sweeps | pegged: skew 0/1, flat 1/1
+  40 sweeps | pegged: skew 0/1, flat 1/1
+  60 sweeps | pegged: skew 0/1, flat 1/1
+  80 sweeps | pegged: skew 0/1, flat 1/1
+  100 sweeps | pegged: skew 0/1, flat 1/1
+  120 sweeps | pegged: skew 0/1, flat 1/1
+  140 sweeps | pegged: skew 0/1, flat 1/1
+  160 sweeps | pegged: skew 0/1, flat 1/1
+  180 sweeps | pegged: skew 0/1, flat 1/1
+  200 sweeps | pegged: skew 0/1, flat 1/1
+  220 sweeps | pegged: skew 0/1, flat 1/1
+  240 sweeps | pegged: skew 0/1, flat 1/1
+
+==============================================================================
+SKEW A/B — 1 markets, 250 sweeps, identical inputs
+==============================================================================
+
+--- SKEW ON (0.01/contract) = what lp_live does ---
+  fills 18   pooled P&L $+0.40   PEGGED 0/1   mean|inv| 2.0   mean max|inv| 7.0 (cap 20)
+     15s  n=   18  markout +0.00c   net +2.08c
+     30s  n=   18  markout +0.00c   net +2.08c
+     60s  n=   17  markout +0.00c   net +2.18c
+    per-market max|inv|: P19SEVBAR-BAR2=7
+
+--- SKEW OFF (0.0) = no inventory lean ---
+  fills 35   pooled P&L $+0.42   PEGGED 1/1   mean|inv| 15.0   mean max|inv| 20.0 (cap 20)
+     15s  n=   35  markout +0.00c   net +0.96c
+     30s  n=   35  markout +0.00c   net +0.96c
+     60s  n=   34  markout +0.00c   net +0.97c
+    per-market max|inv|: P19SEVBAR-BAR2=20*
+
+Read: two-sided capture iff SKEW ON keeps PEGGED at 0 and mean|inv| near flat 
+WHILE net/fill stays positive at 60s. Fill counts are an UPPER bound (queue 
+ignored); markout is queue-independent and is the trustworthy toxicity signal.
+```
