@@ -1099,3 +1099,62 @@ GET /events -> 429, backing off 1.00s (attempt 1/6)
 GET /events -> 429, backing off 1.00s (attempt 1/6)
 No actively-trading benign market found right now. Pass --ticker.
 ```
+
+## 2026-09-20 20:00 UTC — paper pilot (soccer)
+```
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+Paper-quoting KXSERIEASPREAD-26SEP20ACMLEC-ACM2 for 30 min (poll 4s) ...
+  15 sweeps, 87 fills so far
+  30 sweeps, 90 fills so far
+  45 sweeps, 92 fills so far
+  60 sweeps, 100 fills so far
+  75 sweeps, 103 fills so far
+  90 sweeps, 133 fills so far
+  105 sweeps, 159 fills so far
+  120 sweeps, 172 fills so far
+  135 sweeps, 180 fills so far
+  150 sweeps, 185 fills so far
+  165 sweeps, 188 fills so far
+  180 sweeps, 198 fills so far
+  195 sweeps, 201 fills so far
+  210 sweeps, 203 fills so far
+  225 sweeps, 204 fills so far
+  240 sweeps, 208 fills so far
+  255 sweeps, 208 fills so far
+  270 sweeps, 226 fills so far
+  285 sweeps, 236 fills so far
+  300 sweeps, 238 fills so far
+  315 sweeps, 238 fills so far
+  330 sweeps, 238 fills so far
+  345 sweeps, 238 fills so far
+  360 sweeps, 238 fills so far
+  375 sweeps, 238 fills so far
+  390 sweeps, 238 fills so far
+  405 sweeps, 238 fills so far
+  420 sweeps, 238 fills so far
+  435 sweeps, 238 fills so far
+  450 sweeps, 238 fills so far
+
+======================================================================
+PAPER LP PILOT — KXSERIEASPREAD-26SEP20ACMLEC-ACM2
+======================================================================
+ran 21.7 min, 327 polls, avg spread 6.1c
+(upper-bound) fills: 238   buys: 88   sells: 150   net inventory: -62
+
+gross edge captured (Σ side·(mid−fill)) : +563.5c over 238 fills = +2.37c/fill
+ horizon  fills w/ mark   mean markout   mean net pnl
+-----------------------------------------------------
+    15s            238         +0.72c         +3.09c
+    30s            238         +1.08c         +3.45c
+    60s            238         +1.03c         +3.40c
+
+Read: markout<0 = adverse selection (toxic); net pnl = edge + markout per
+fill. POSITIVE net across horizons => a maker plausibly profits here -> a real
+Phase-B candidate. Reminder: fill rate is an UPPER BOUND (queue ignored); only
+live resting orders (Phase B) give the true rate. Markout is queue-independent.
+```
