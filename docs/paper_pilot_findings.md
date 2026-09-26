@@ -1193,3 +1193,11 @@ GET /events -> 429, backing off 1.00s (attempt 1/6)
 GET /events -> 429, backing off 1.00s (attempt 1/6)
 No actively-trading benign market found right now. Pass --ticker.
 ```
+
+## 2026-09-26 08:04 UTC — paper pilot (soccer)
+```
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+GET /events -> 429, backing off 1.00s (attempt 1/6)
+No actively-trading benign market found right now. Pass --ticker.
+```
