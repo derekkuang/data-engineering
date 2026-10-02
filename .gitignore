@@ -27,6 +27,9 @@ dist/
 *.pem
 *.key
 service-account*.json
+# venue API credential folders (whole directory — key files have no extension to match on)
+.kalshi/
+.polymarket/
 
 # Data files (don't commit raw or processed data)
 /data/

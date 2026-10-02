@@ -5,11 +5,11 @@ studies, one-off probes) + a `VERDICT.md` with the status, the numbers, and why 
 open or closed. The reusable machinery (maker engine, ws capture, walk-forward harness)
 lives in `core/`; the data pipeline in `ingestion/` + `dbt/`.
 
-## Status board (updated 2026-08-21)
+## Status board (updated 2026-10-01)
 
 | Strategy | Status | One-line verdict |
 |---|---|---|
-| [`soccer_mm/`](soccer_mm/VERDICT.md) | **ACTIVE** | The one surviving edge: in-play soccer spread-making, WC net +$53/5d; next = live Liga MX SPREAD pilot (capture-efficiency + toxicity transfer). |
+| [`soccer_mm/`](soccer_mm/VERDICT.md) | CLOSED (for now, 2026-10-01) | WC net +$53/5d stands; club soccer did NOT transfer — jump axis drifted toxic on 31–42 capture-days (zero club SPREAD/TOTAL family jump-benign), real money +$0.63/94 fills but −$0.38 ex one goal. Revisit triggers in VERDICT. |
 | [`politics_mm/`](politics_mm/VERDICT.md) | **GATED** | First gross-positive of the whole hunt (maker@bid +3.4–7.3%/ct); paper says short-horizon toxicity non-fatal, but fill-rate + months-long inventory are capital-gated → needs a small real-money pilot (Derek's call). |
 | [`btc_direction/`](btc_direction/VERDICT.md) | CLOSED | ~10 axes, all null net of cost; the 15-min market is calibrated (ECE 0.5%) and the +8% backtest was a latency artifact. |
 | [`weather_taker/`](weather_taker/VERDICT.md) | CLOSED | Market well-calibrated (ECE 2–4%); no taker edge clears spread+fee; maker angle dead (−0.44c convergence pick-off). |

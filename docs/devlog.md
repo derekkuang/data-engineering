@@ -4,6 +4,41 @@ A running journal of work on the crypto data-engineering pipeline — what I did
 
 ---
 
+## 2026-10-01 — soccer_mm CLOSED for now; pivot to a Kalshi × Polymarket US scanner
+
+Status audit before deciding what's next. Three things changed since 09-13, all in the same direction:
+
+**1. A second live session (09-14) that looked positive and wasn't.** Multi-market `lp_live`, 66 fills,
+**net +$0.85** — but **+$1.01 is a single goal** on `KXSERIEATOTAL-26SEP14INTUDI-8` (long 2 at ~20c,
+Over went to ~90c). Same market, other side: our skewed ask at 28c got lifted with the mid at 79.5c.
+Ex that market, −$0.16 on 58 fills. Cumulative real club soccer: +$0.63 / 94 fills, **−$0.38 ex-jump**.
+The session also hit the thread-collision bug (fixed `9e1722c`) — dedupe `lp_sessions.csv` by last row
+per ticker before reading it.
+
+**2. The skew A/B replicated cleanly — 19/19 runs over 13 days** (ON−OFF +2.11c [+1.68, +2.52]
+day-block). A real, robust RELATIVE result. Paper's ABSOLUTE level is still not believable: +3.8c/fill
+on paper vs ≈ −0.4c/fill real.
+
+**3. The verdict drifted toxic.** With 31–42 capture-days, CLUB_SOCCER/SPREAD jump went 0.093 → 0.269
+and TOTAL 0.229 → 0.350; per league, zero club SPREAD/TOTAL families read jump-benign, seven read
+jump-TOXIC — including Liga MX and Brasileirao, the "makeable" targets. The wide books are wide because
+goals pick makers off.
+
+**Decision: close soccer_mm for now** (details + revisit triggers in `strategies/soccer_mm/VERDICT.md`).
+`skew-ab.yml` and `paper-pilot.yml` disabled via `gh workflow disable`; ws-capture keeps running so
+revisit trigger (a) is monitored for free.
+
+**Lesson worth keeping:** an early benign read on 9 days regressed on 31. The floor that "cleared" was
+a minimum, not evidence — and the stopping rule I wrote on 09-13 had no power (one goal = ±$1 vs
+±$0.20/session of capture). Pin the metric AND check its power before pre-committing to it.
+
+**Next:** the 08-24 Polymarket revisit trigger ("QCX ships a public trading API") has fired —
+docs.polymarket.us now documents a self-serve retail API, and a maker-rebate fee schedule went live
+today. New standalone repo for a Kalshi × Polymarket US cross-venue scanner; this repo stays the
+warehouse + the honest single-venue arc.
+
+---
+
 ## 2026-09-12/13 — FIRST REAL MONEY on club soccer: the binding constraint is OPPORTUNITY, not toxicity
 
 Ran the first live club-soccer pilot. **29 fills / 12 market-sessions / −$0.22** (balance $15.61 → $15.39). Mechanically a clean success — **23 of 29 fills were PASSIVE maker fills at zero fee**, inventory returned to flat every time, nothing pegged, no kill switch, zero open positions at the end. The 6 taker fills ($0.035) were the aggressive flatten doing its job.

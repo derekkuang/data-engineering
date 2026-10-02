@@ -1,6 +1,7 @@
 # soccer_mm — in-play soccer market-making
 
-**Status: ACTIVE (the one surviving edge). Next action: live Liga MX SPREAD pilot.**
+**Status: CLOSED for now (2026-10-01) — null-leaning on club soccer, NOT disproven; the WC
+result stands. Revisit triggers in the 2026-10-01 section at the bottom.**
 
 **Thesis.** Kalshi's in-play soccer TOTAL/SPREAD books carry wide retail spreads, and
 soccer's rare discrete scoring keeps the book mean-reverting — a maker captures spread
@@ -104,3 +105,72 @@ benign-to-favorable; what is scarce is *makeable opportunity*. Two implications:
 sessions** on Liga MX / Brasileirao / Ligue 1 with multi-market enabled. If cumulative
 realized capture is not positive by then, close the track and write it up as a null —
 the honest arc is the deliverable either way.
+
+## 2026-10-01 — CLOSED for now: the jump axis drifted toxic and real capture is not positive
+
+**Second live session (2026-09-14, multi-market `lp_live`, Serie A / EPL / La Liga).** 66
+fills over 7 markets, **net +$0.85** — but **+$1.01 of it is ONE goal**: on
+`KXSERIEATOTAL-26SEP14INTUDI-8` we were long 2 at ~20c when a goal sent the Over to ~90c.
+The same market shows the risk side too: our skewed ask at 28c was still resting when the mid
+hit 79.5c and got lifted (~51c pick-off on one contract). Ex that market: **−$0.16 on 58
+fills**. The session is also contaminated by the thread-collision bug (two threads on one
+ticker cancelling each other's orders; fixed `9e1722c`), which duplicated rows in
+`data/lp_sessions.csv` — the numbers here take the LAST row per ticker (`kalshi_gross` is
+Kalshi's own per-ticker realized P&L, gross of fees; net = gross − fees, which reproduces
+the 09-12 −$0.22 exactly). It ran on the big five, not the revised targets.
+
+| real money, club soccer | fills | net | ex-jump |
+|---|---|---|---|
+| 2026-09-12 | 28 | −$0.22 | −$0.22 |
+| 2026-09-14 | 66 | +$0.85 | −$0.16 |
+| **total** | **94** | **+$0.63** | **−$0.38 (−0.44c/fill)** |
+
+**Skew A/B replicated — 19/19 runs, 13 days.** Skew ON beat OFF on net/fill @60s in every
+run. Fill-weighted, day-block bootstrap: ON **+3.83c [+2.91, +4.39]**, ON−OFF **+2.11c
+[+1.68, +2.52]**, split-half stable (ON 4.21 / 3.59). Markout @60s ON −0.55c [−1.24, −0.08],
+~4x the WC's −0.135c. Skew is a real improvement (and `lp_live` already has it), but this is
+a RELATIVE result inside the simulator: paper's absolute level (+3.8c/fill) vs real
+(≈ −0.4c/fill ex-jump) is the 12–50x queue gap from 09-12 again plus the flatten cost paper
+never charges.
+
+**The pooled verdict drifted toward toxic with 3–4x more days** (`edge_verdict
+--pool-club-soccer`, re-run 2026-10-01):
+
+| family | 2026-09-02 | 2026-10-01 |
+|---|---|---|
+| CLUB_SOCCER/SPREAD | 9 days, jump 0.093 = BENIGN | 31 days, jump 0.269, INCONCLUSIVE |
+| CLUB_SOCCER/TOTAL | 18 days, jump 0.229 | 42 days, jump 0.350, INCONCLUSIVE |
+
+Per league, **zero** club SPREAD/TOTAL families read jump-benign. Jump-TOXIC (CI above
+0.25c): LaLiga TOTAL + SPREAD, Brasileirao TOTAL + SPREAD, LigaMX TOTAL, SerieA TOTAL,
+Bundesliga TOTAL; LIGAMX/SPREAD is also flow-TOXIC (+0.38c [+0.21, +0.56]). The early
+per-league benign reads (LaLiga/SPREAD 0.115, SerieA/SPREAD 0.011 on 09-02) were small-sample.
+
+**Why closed.**
+1. The load-bearing assumption of the transfer thesis — club soccer is jump-benign like the
+   WC — did not survive more data.
+2. Opportunity and toxicity point in opposite directions: the makeable leagues (Liga MX,
+   Brasileirao: wide + flowing) are wide BECAUSE goals pick makers off; the calm big-five
+   books are pinned at the 1c tick. The spread is the price of the risk, not a free lunch —
+   the same mechanism that closed Polymarket.
+3. The fail-CLOSED gate itself would now refuse every revised target; more live sessions
+   would mean `--pilot`-overriding the gate on exactly the risk it exists to catch.
+4. The pre-committed stopping rule caps live sessions at 5; it does not require spending
+   them. And it has ~no power anyway: one goal swings ±$1 against ~±$0.20/session of capture.
+
+**PROVEN vs ASSUMED.** Proven: the jump-axis drift (31–42 capture-days, day-block CIs); the
+paper-vs-real gap; skew's relative benefit. NOT proven: that realized club capture is
+negative — 94 fills over 2 sessions cannot establish that. Hence "closed for now", not
+"disproven".
+
+**Revisit triggers.** (a) a sufficient-sample `edge_verdict` read with a club SPREAD/TOTAL
+family jump-BENIGN on its CI (ws-capture keeps running, so this is monitored for free);
+(b) the next major international tournament (the WC conditions are where the edge was real);
+(c) a pull-on-tape-surge rule actually wired into `lp_live` — `pickoff_dynamics` documents it
+but the live bot does not implement it, and the INTUDI-8 stale ask is the case it targets.
+
+**Operational state at close.** `skew-ab.yml` + `paper-pilot.yml` disabled via
+`gh workflow disable` (re-enable: `gh workflow enable <file>`); `ws-capture.yml`,
+`pipeline.yml`, `ci.yml` stay on. EC2 runner (`docs/setup/11-ec2-runner.md`) was never
+provisioned. Kalshi account $0.0061, no positions, no fills since 09-15. The two live
+sessions never reached the warehouse (`realized_$` is empty for CLUB_SOCCER).
